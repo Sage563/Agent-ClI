@@ -1,0 +1,5 @@
+{
+    "main": "build/agent-cli.cjs",
+    "output": "build/sea-prep.blob",
+    "execArgv": ["--no-warnings", "--no-deprecation", "--disable-warning=ExperimentalWarning"]
+}

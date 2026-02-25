@@ -1,0 +1,36 @@
+﻿{
+  "dark": [
+    "{shift}            {sky1}      .   .             ",
+    "{shift}            {sky2}  .       .             ",
+    "{shift}            {sky3}      .                ",
+    "{shift}                  /\\                     ",
+    "{shift}                 /{px1}{leafA}\\                    ",
+    "{shift}                /  *  \\                   ",
+    "{shift}               / {px2} {leafB} {px3} \\                  ",
+    "{shift}              /  *  o  +  \\                 ",
+    "{shift}             / *  +  o  *  \\                ",
+    "{shift}            /________________\\               ",
+    "{shift}                  |  |                    ",
+    "{shift}                  |  |                    ",
+    "{shift}                  |  |                    ",
+    "{shift}                 _|__|_                   ",
+    "{shift}            =================             "
+  ],
+  "white": [
+    "{shift}            {sky1}      .   .             ",
+    "{shift}            {sky2}  .       .             ",
+    "{shift}            {sky3}      .                ",
+    "{shift}                  /\\                     ",
+    "{shift}                 /{px1}{leafA}\\                    ",
+    "{shift}                /  *  \\                   ",
+    "{shift}               / {px2} {leafB} {px3} \\                  ",
+    "{shift}              /  *  o  +  \\                 ",
+    "{shift}             / *  +  o  *  \\                ",
+    "{shift}            /________________\\               ",
+    "{shift}                  |  |                    ",
+    "{shift}                  |  |                    ",
+    "{shift}                  |  |                    ",
+    "{shift}                 _|__|_                   ",
+    "{shift}            =================             "
+  ]
+}
