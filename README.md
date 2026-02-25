@@ -67,25 +67,6 @@ docker run --rm -it agent-cli:latest
 - `scripts/`: build and asset tooling
 - `assets/`: static assets/icons
 - `release/`: generated distribution artifacts
-
-## Scalability Baseline
-
-- Structured provider abstraction and runtime model/provider switching
-- Mission loop with tool execution, approvals, and apply pipeline
-- Stream parsing + activity output for long-running tasks
-- Reproducible release artifacts with checksum
-- CI gate to prevent broken builds from shipping
-
-## Feature Parity Roadmap
-
-If you want closer parity with full “Claude Code-like” capability, implement in phases:
-1. Reliability: strict response schema validation, retries, timeout policies, recovery.
-2. Tooling: richer MCP servers, safer execution boundaries, policy-driven permissions.
-3. Context: stronger indexing/RAG, memory compaction, relevance scoring.
-4. Collaboration: review mode, confidence scoring, test-first patch flows.
-5. Operations: telemetry hooks, structured logs, metrics/SLO dashboards.
-
 ---
-*Built with precision for the modern developer.*
 
 *Run `/donut` for a little fun.*
