@@ -75,7 +75,7 @@ export class OllamaProvider extends Provider {
       typeof task._stream_enabled === "boolean" ? task._stream_enabled : Boolean(providerConfig.stream ?? cfg.get("stream", true));
 
     const payload = {
-      model: String(providerConfig.model || "qwen2.5-coder:7b"),
+      model: String(providerConfig.model || "qwen3:14b"),
       messages,
       stream: Boolean(streamEnabled),
       options: generation,

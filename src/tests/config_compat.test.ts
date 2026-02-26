@@ -28,6 +28,7 @@ describe("config compatibility", () => {
     expect(config.getActiveProvider()).toBe("ollama");
     expect(config.isNewlineSupport()).toBe(true);
     expect(config.isMcpEnabled()).toBe(false);
+    expect(Boolean(config.get("strict_edit_requires_full_access", false))).toBe(false);
 
     config.setApiKey("openai", "sk-test");
     config.setModel("openai", "gpt-4o-mini");

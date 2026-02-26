@@ -29,6 +29,27 @@ function getSessionPath(name: string) {
   return path.join(APP_SESSIONS_DIR(), `${name}.json`);
 }
 
+function pickMostRecentSessionName(excludeName?: string) {
+  ensureSessionsDir();
+  const files = fs
+    .readdirSync(APP_SESSIONS_DIR())
+    .filter((f) => f.endsWith(".json"))
+    .filter((f) => f.replace(/\.json$/i, "") !== excludeName)
+    .map((f) => {
+      const name = f.replace(/\.json$/i, "");
+      const fullPath = path.join(APP_SESSIONS_DIR(), f);
+      let mtime = 0;
+      try {
+        mtime = Number(fs.statSync(fullPath).mtimeMs || 0);
+      } catch {
+        mtime = 0;
+      }
+      return { name, mtime };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+  return files[0]?.name || "";
+}
+
 export function load(name?: string): SessionFile {
   ensureSessionsDir();
   const sessionName = name || getActiveSessionName();
@@ -101,7 +122,10 @@ export function listSessions() {
 export function deleteSession(name: string) {
   const p = getSessionPath(name);
   if (fs.existsSync(p)) fs.removeSync(p);
-  if (getActiveSessionName() === name) setActiveSessionName(DEFAULT_SESSION);
+  if (getActiveSessionName() === name) {
+    const fallback = pickMostRecentSessionName(name) || DEFAULT_SESSION;
+    setActiveSessionName(fallback);
+  }
 }
 
 export function clear() {

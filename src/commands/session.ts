@@ -9,6 +9,7 @@ import {
   setActiveSessionName,
 } from "../memory";
 import { printError, printInfo, printSuccess } from "../ui/console";
+import { showSessionGui } from "../ui/session_gui";
 
 registry.register("/session", "Manage sessions (list, new, load, delete, rename)")((_, args) => {
   if (args.length < 2) {
@@ -36,6 +37,10 @@ registry.register("/session", "Manage sessions (list, new, load, delete, rename)
     printSuccess(`Started new session: ${name}`);
     return true;
   }
+  if (sub === "pick" || sub === "gui") {
+    void showSessionGui();
+    return true;
+  }
   if (sub === "load") {
     if (args.length < 3) {
       printError("Usage: /session load <name>");
@@ -55,7 +60,7 @@ registry.register("/session", "Manage sessions (list, new, load, delete, rename)
       printError("Usage: /session delete <name>");
       return true;
     }
-    const name = args[2];
+    const name = args[2] === "current" ? getActiveSessionName() : args[2];
     if (!listSessions().includes(name)) {
       printError(`Session not found: ${name}`);
       return true;
@@ -86,7 +91,7 @@ registry.register("/session", "Manage sessions (list, new, load, delete, rename)
     }
     return true;
   }
-  printError("Usage: /session [list|new|load|delete|rename]");
+  printError("Usage: /session [list|new|load|delete|rename|pick]");
   return true;
 });
 

@@ -27,11 +27,16 @@ function main() {
   }
 
   for (const name of entries) {
-    const exePath = path.join(RELEASE_DIR, name);
-    const sum = sha256(exePath);
-    const outPath = path.join(RELEASE_DIR, `${name}.sha256`);
-    fs.writeFileSync(outPath, `${sum}  ${name}\n`, "utf8");
-    console.log(`wrote ${path.relative(ROOT, outPath)}`);
+    try {
+      const exePath = path.join(RELEASE_DIR, name);
+      const sum = sha256(exePath);
+      const outPath = path.join(RELEASE_DIR, `${name}.sha256`);
+      fs.writeFileSync(outPath, `${sum}  ${name}\n`, "utf8");
+      console.log(`wrote ${path.relative(ROOT, outPath)}`);
+    } catch (error) {
+      const msg = error && error.message ? error.message : String(error);
+      console.warn(`skipped checksum for ${name}: ${msg}`);
+    }
   }
 }
 

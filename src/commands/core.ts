@@ -3,9 +3,9 @@ import os from "os";
 import path from "path";
 import { registry } from "./registry";
 import { cfg } from "../config";
-import { clearScreen, printError, printInfo, printPanel, printSuccess, printWarning, console } from "../ui/console";
+import { clearScreen, printError, printInfo, printPanel, printSuccess, printWarning } from "../ui/console";
 import logUpdate from "log-update";
-import { listSessions, estimateTokens, load, compactSession } from "../memory";
+import { estimateTokens, load, compactSession } from "../memory";
 import { undoLastApply } from "../applier";
 import { printSessionStats } from "../ui/console";
 import { intel } from "../core/intelligence";
@@ -39,14 +39,14 @@ function estimateContextWindow(provider: string, model: string) {
 
 registry.register("/help", "Show available commands")(async () => {
   const categories: Record<string, Set<string>> = {
-    General: new Set(["/help", "/exit", "/cls", "/cd", "/read", "/ls", "/tree", "/undo", "/see"]),
+    General: new Set(["/help", "/exit", "/cls", "/cd", "/read", "/ls", "/tree", "/undo", "/see", "/search", "/list_diff"]),
     "AI & Context": new Set(["/model", "/provider", "/think", "/compact", "/cost", "/unlimited", "/status"]),
     "Git Integration": new Set(["/diff", "/review", "/commit", "/pr"]),
     "Intelligence & Ops": new Set(["/index", "/lint", "/scan", "/intel"]),
-    Configuration: new Set(["/config"]),
+    Configuration: new Set(["/config", "/timeout"]),
     Modes: new Set(["/fast", "/plan", "/mission", "/voice"]),
     "Session & Dev": new Set(["/session", "/reset", "/mcp", "/debug", "/code", "/init"]),
-    Runtime: new Set(["/checkpoint", "/resume", "/budget", "/ps", "/kill"]),
+    Runtime: new Set(["/checkpoint", "/resume", "/budget", "/ps", "/kill", "/logs", "/access"]),
   };
 
   const byName = new Map(registry.listCommands().map(([name, desc]) => [name, desc]));
@@ -81,7 +81,7 @@ registry.register("/help", "Show available commands")(async () => {
     }
     text += "\n";
   }
-  text += "## Shell\n- `!<command>`: Execute shell commands inline (e.g., `!git status`)\n\n";
+  text += "## Shell\n- `!<command>`: Execute shell commands inline (e.g., `!git status`)\n- `F6`: Open IDE (VS Code)\n\n";
   text += "## Project\n- **AGENTS.md**: Place in project root for custom instructions\n";
   printPanel(text, "Agent CLI - Help", "blue", true);
   return true;

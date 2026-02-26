@@ -1,6 +1,6 @@
 ﻿import { execSync } from "child_process";
 import fs from "fs-extra";
-import path from "path";
+
 import readline from "readline";
 import chalk from "chalk";
 import logUpdate from "log-update";
@@ -428,58 +428,6 @@ async function selectWithArrows(params: {
   });
 }
 
-async function waitForEnterScreen(mode: ThemeMode, title: string, description: string[], hint?: string) {
-  if (!process.stdin.isTTY) return;
-  await new Promise<void>((resolve) => {
-    let frame = 0;
-    const stdin = process.stdin;
-    readline.emitKeypressEvents(stdin);
-    stdin.setRawMode?.(true);
-    stdin.resume();
-
-    const render = () =>
-      logUpdate(
-        renderScreen({
-          mode,
-          frame,
-          title,
-          description,
-          options: [],
-          selectedIndex: 0,
-          hint,
-          stepLabel: "Onboarding",
-        }),
-      );
-    const timer = setInterval(() => {
-      frame = (frame + 1) % 256;
-      render();
-    }, 180);
-
-    const cleanup = () => {
-      clearInterval(timer);
-      stdin.setRawMode?.(false);
-      stdin.removeListener("keypress", onKeypress);
-      logUpdate.clear();
-    };
-
-    const onKeypress = (_str: string, key: readline.Key) => {
-      if (!key) return;
-      if (key.name === "return" || key.name === "enter" || key.name === "space") {
-        cleanup();
-        resolve();
-        return;
-      }
-      if (key.ctrl && key.name === "c") {
-        cleanup();
-        resolve();
-      }
-    };
-
-    stdin.on("keypress", onKeypress);
-    render();
-  });
-}
-
 function applyAccessScope(scope: AccessScope) {
   cfg.set("access_scope", scope);
   if (scope === "full_desktop") {
@@ -512,7 +460,6 @@ function applyAccessScope(scope: AccessScope) {
 }
 
 function showStaticScreen(mode: ThemeMode, title: string, description: string[]) {
-  console.clear();
   console.print(
     renderScreen({
       mode,
@@ -544,7 +491,7 @@ async function configureProvider(provider: string, mode: ThemeMode, alwaysAsk = 
   const existingEndpoint = cfg.getEndpoint(provider);
   const existingModel = cfg.getModel(provider);
   const defaultEndpoint = provider === "ollama" ? "http://localhost:11434" : (existingEndpoint || "");
-  const defaultModel = provider === "ollama" ? "qwen2.5-coder:7b" : (existingModel || "");
+  const defaultModel = provider === "ollama" ? "qwen3:14b" : (existingModel || "");
 
   const endpointLabel = provider === "ollama" ? "Ollama endpoint" : `Optional endpoint for ${providerLabel}`;
   const endpoint = (await console.input(`${endpointLabel} [${defaultEndpoint}]: `)).trim();
@@ -635,15 +582,6 @@ export async function runFirstLaunchOnboarding() {
 
   const pickedTheme = THEME_OPTIONS[themeIdx]?.value || "dark";
   setThemePreset(pickedTheme, true);
-  console.clear();
-
-  await waitForEnterScreen(
-    pickedTheme,
-    "Disclaimer",
-    ["Sage 563 is not responsible for damage, data loss, or unintended system changes caused by usage."],
-    "Press Enter to continue.",
-  );
-  console.clear();
 
   const accessOptions: Array<{ label: string; description: string; value: AccessScope }> = [
     {
@@ -669,19 +607,6 @@ export async function runFirstLaunchOnboarding() {
   });
   const scope = accessOptions[accessIdx]?.value || "limited";
   applyAccessScope(scope);
-  console.clear();
-
-  await waitForEnterScreen(
-    pickedTheme,
-    "Mission Mode",
-    [
-      "Mission mode can run multi-step workflows autonomously until complete.",
-      "It can combine file edits, web/project search, and command execution across steps.",
-      "If no progress is detected repeatedly, mission mode now auto-stops to avoid stalling.",
-    ],
-    "Press Enter to continue setup.",
-  );
-  console.clear();
 
   const normalizedProviders = [...BUILTIN_PROVIDERS];
   const providerOptions = normalizedProviders.map((p) => ({
@@ -703,27 +628,10 @@ export async function runFirstLaunchOnboarding() {
 
   const pickedProvider = normalizedProviders[providerIdx] || "ollama";
   cfg.setActiveProvider(pickedProvider);
-  console.clear();
 
   await configureProvidersFirstRun(pickedProvider, pickedTheme);
 
   cfg.set("onboarding_completed", true);
-  console.clear();
-  await waitForEnterScreen(
-    pickedTheme,
-    "Onboarding Complete",
-    [
-      "Setup is complete. Your selected theme is now active across the program.",
-      "What to do next:",
-      "> Type your task and press Enter",
-      "> Use /help for commands",
-      "> Use /config -h to view all configurable settings",
-      "> Use @file to attach files",
-      "> Use /mission for autonomous execution",
-    ],
-    "Press Enter to start Agent CLI.",
-  );
-  console.clear();
 }
 
 

@@ -12,7 +12,7 @@ const FALLBACK_CONFIG = {
   providers: {
     ollama: {
       endpoint: "http://localhost:11434",
-      model: "qwen2.5-coder:14b",
+      model: "qwen3:14b",
       generation: { temperature: 0.7, num_ctx: 32768 },
     },
     openai: { model: "gpt-4o", generation: { temperature: 0 } },

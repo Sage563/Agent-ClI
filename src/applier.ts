@@ -11,27 +11,38 @@ type UndoEntry = {
 const UNDO_STACK: UndoEntry[][] = [];
 
 function normalizeNewlines(value: string) {
-  return String(value || "").replace(/\r?\n/g, "\n");
+  if (!value) return "";
+  // Handle literal escaped \n strings that might come from JSON if not properly parsed
+  let val = String(value).replace(/\\n/g, "\n");
+  return val.replace(/\r?\n/g, "\n");
 }
 
 function replaceByTrimmedLineBlock(current: string, original: string, edited: string) {
   const lines = current.split(/\r?\n/);
   const needleLines = original.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0);
   if (!needleLines.length) return null;
-  for (let i = 0; i < lines.length; i += 1) {
+
+  let outLines = [...lines];
+  let replacedCount = 0;
+
+  for (let i = 0; i <= outLines.length - needleLines.length; i += 1) {
     let matched = true;
-    for (let j = 0; j < needleLines.length && i + j < lines.length; j += 1) {
-      if (lines[i + j].trim() !== needleLines[j]) {
+    for (let j = 0; j < needleLines.length; j += 1) {
+      if (outLines[i + j].trim() !== needleLines[j]) {
         matched = false;
         break;
       }
     }
-    if (!matched) continue;
-    const replacement = edited.split(/\r?\n/);
-    const out = [...lines.slice(0, i), ...replacement, ...lines.slice(i + needleLines.length)];
-    return out.join("\n");
+    if (matched) {
+      const replacement = edited.split(/\r?\n/);
+      outLines.splice(i, needleLines.length, ...replacement);
+      replacedCount += 1;
+      // Skip over the replacement to avoid re-matching or overlaps if suitable
+      i += replacement.length - 1;
+    }
   }
-  return null;
+
+  return replacedCount > 0 ? outLines.join("\n") : null;
 }
 
 export function apply(
@@ -59,23 +70,20 @@ export function apply(
 
       let nextContent = "";
       if (existedBefore) {
-        const current = previousContent || "";
+        let current = previousContent || "";
         if (change.original) {
-          // 1. Exact match attempt
+          // 1. Exact match attempt (multi-replacement via split/join)
           if (current.includes(change.original)) {
-            nextContent = current.replace(change.original, change.edited);
+            nextContent = current.split(change.original).join(change.edited);
           } else {
             // 2. Whitespace-insensitive fallback
             const normalizedCurrent = normalizeNewlines(current);
             const normalizedOriginal = normalizeNewlines(change.original);
 
             if (normalizedCurrent.includes(normalizedOriginal)) {
-              // If normalized match works, we need to find the literal block to replace
-              // This is complex, but for now we fallback to direct replace on normalized if strictly necessary,
-              // or better yet, we try to match line by line.
-              nextContent = normalizedCurrent.replace(normalizedOriginal, normalizeNewlines(change.edited));
+              nextContent = normalizedCurrent.split(normalizedOriginal).join(normalizeNewlines(change.edited));
             } else {
-              // 3. Trimmed line-by-line fallback for minor indentation drift
+              // 3. Trimmed line-by-line fallback for minor indentation drift (multi-replace)
               const lineFallback = replaceByTrimmedLineBlock(current, change.original, change.edited);
               if (lineFallback !== null) {
                 nextContent = lineFallback;

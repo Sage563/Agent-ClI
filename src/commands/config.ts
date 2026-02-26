@@ -5,6 +5,8 @@ import { printError, printInfo, printPanel, printSuccess, printWarning, reloadTh
 const GENERATION_KEYS = new Set(["temperature", "max_tokens", "max_output_tokens", "num_ctx", "top_p", "top_k", "num_predict", "repeat_penalty"]);
 const STREAM_KEYS = new Set(["stream", "stream_print"]);
 const GLOBAL_STREAM_KEYS = new Set(["stream_global", "stream_print_global"]);
+const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "command_timeout_ms"]);
+const BOOLEAN_RUNTIME_KEYS = new Set(["command_log_enabled", "env_bridge_enabled", "strict_edit_requires_full_access"]);
 const THEME_KEYS = new Set(["primary", "secondary", "accent", "success", "warning", "error", "dim", "bg"]);
 const VALID_PROVIDERS = ["ollama", "openai", "anthropic", "gemini", "deepseek"];
 const CONFIG_HELP_FLAGS = new Set(["-h", "--help", "help"]);
@@ -32,6 +34,10 @@ function printConfigHelp() {
   text += "- `effort` (`low`, `medium`, `high`)\n";
   text += "- `reasoning` (`low`, `standard`, `high`, `extra`)\n";
   text += "- `mcp_enabled` (`true`/`false`)\n";
+  text += "- `env_bridge_enabled` (`true`/`false`)\n";
+  text += "- `command_log_enabled` (`true`/`false`)\n";
+  text += "- `strict_edit_requires_full_access` (`true`/`false`)\n";
+  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `command_timeout_ms` (set `0` for unlimited)\n";
   text += "\n## Generation Keys (number)\n";
   text += `- ${Array.from(GENERATION_KEYS).join(", ")}\n`;
   text += "\n## Stream Keys\n";
@@ -108,6 +114,8 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
       printInfo(`max_budget: $${cfg.getBudget().toFixed(2)}`);
     } else if (key === "run_policy") {
       printInfo(`run_policy: ${cfg.getRunPolicy()}`);
+    } else if (NUMERIC_RUNTIME_KEYS.has(key) || BOOLEAN_RUNTIME_KEYS.has(key)) {
+      printInfo(`${key}: ${String(cfg.get(key, "(default)"))}`);
     } else if (key === "endpoint") {
       const provider = cfg.getActiveProvider();
       printInfo(`endpoint (${provider}): ${cfg.getEndpoint(provider) || "(default)"}`);
@@ -169,6 +177,33 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
     } else {
       printError(`${key} must be true/false`);
     }
+    return true;
+  }
+
+  if (NUMERIC_RUNTIME_KEYS.has(key)) {
+    const parsed = Number(value);
+    if (Number.isNaN(parsed)) {
+      printError(`${key} must be a number`);
+      return true;
+    }
+    cfg.set(key, parsed);
+    printSuccess(`Set ${key} = ${parsed}`);
+    return true;
+  }
+
+  if (BOOLEAN_RUNTIME_KEYS.has(key)) {
+    const v = value.toLowerCase();
+    if (["true", "1", "on", "enable", "enabled", "yes"].includes(v)) {
+      cfg.set(key, true);
+      printSuccess(`Set ${key} = true`);
+      return true;
+    }
+    if (["false", "0", "off", "disable", "disabled", "no"].includes(v)) {
+      cfg.set(key, false);
+      printSuccess(`Set ${key} = false`);
+      return true;
+    }
+    printError(`${key} must be true/false`);
     return true;
   }
 
@@ -256,7 +291,7 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
 
   printWarning(`Unknown config key: ${key}`);
   printInfo(
-    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, theme.*, run_policy, budget",
+    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
   );
   printInfo("Run `/config -h` to see full config help.");
   return true;
@@ -352,6 +387,32 @@ registry.register("/model", "Switch or view AI model (e.g. /model gpt-4o-mini)")
   }
   cfg.setModel(provider, nextModel);
   printSuccess(`Switched ${provider} model to: ${nextModel}`);
+  return true;
+});
+
+registry.register("/timeout", "Set command timeout. Usage: /timeout <ms|unlimited>")((_, args) => {
+  if (args.length < 2) {
+    const current = Number(cfg.get("command_timeout_ms", 30_000));
+    if (current <= 0) {
+      printInfo("Command timeout: unlimited");
+    } else {
+      printInfo(`Command timeout: ${current}ms`);
+    }
+    return true;
+  }
+  const raw = String(args[1] || "").trim().toLowerCase();
+  if (raw === "unlimited" || raw === "none" || raw === "off" || raw === "0") {
+    cfg.set("command_timeout_ms", 0);
+    printSuccess("Command timeout set to unlimited.");
+    return true;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    printError("Usage: /timeout <ms|unlimited>");
+    return true;
+  }
+  cfg.set("command_timeout_ms", Math.floor(parsed));
+  printSuccess(`Command timeout set to ${Math.floor(parsed)}ms.`);
   return true;
 });
 

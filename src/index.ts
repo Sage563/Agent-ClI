@@ -22,16 +22,6 @@ process.stderr.write = ((chunk: any, ...args: any[]) => {
   return (originalStderrWrite as any)(chunk, ...args);
 }) as typeof process.stderr.write;
 
-if (process.stdout.isTTY) {
-  // SEA warnings can print during boot; clear a few times during startup.
-  process.stdout.write("\x1Bc");
-  setTimeout(() => {
-    process.stdout.write("\x1Bc");
-  }, 50);
-  setTimeout(() => {
-    process.stdout.write("\x1Bc");
-  }, 200);
-}
 const originalEmitWarning = process.emitWarning.bind(process);
 process.emitWarning = ((warning: any, ...args: any[]) => {
   const msg = String(warning?.message || warning || "");

@@ -5,8 +5,8 @@ import logUpdate from "log-update";
 import readline from "readline";
 import { APP_ONBOARDING_ART } from "../app_dirs";
 import { cfg } from "../config";
-import { getActiveSessionName, listSessions, readSession, setActiveSessionName } from "../memory";
-import { printSuccess } from "./console";
+import { clear, deleteSession, getActiveSessionName, listSessions, readSession, setActiveSessionName } from "../memory";
+import { console, printSuccess, printWarning } from "./console";
 
 type SessionSummary = {
   name: string;
@@ -291,6 +291,8 @@ function renderScreen(params: {
   return lines.join("\n");
 }
 
+type SelectResult = { type: "select"; index: number } | { type: "delete"; index: number } | { type: "new" } | null;
+
 async function selectWithArrows(params: {
   mode: ThemeMode;
   title: string;
@@ -300,11 +302,11 @@ async function selectWithArrows(params: {
   animate?: boolean;
   hint?: string;
   stepLabel?: string;
-}): Promise<number | null> {
+}): Promise<SelectResult> {
   const { mode, title, description, options, initialIndex = 0, animate = true, hint, stepLabel } = params;
-  if (!process.stdin.isTTY) return initialIndex;
+  if (!process.stdin.isTTY) return { type: "select", index: initialIndex };
 
-  return await new Promise<number | null>((resolve) => {
+  return await new Promise<SelectResult>((resolve) => {
     let index = initialIndex;
     let frame = 0;
     const stdin = process.stdin;
@@ -354,7 +356,17 @@ async function selectWithArrows(params: {
       }
       if (key.name === "return" || key.name === "enter") {
         cleanup();
-        resolve(index);
+        resolve({ type: "select", index });
+        return;
+      }
+      if (key.name === "d") {
+        cleanup();
+        resolve({ type: "delete", index });
+        return;
+      }
+      if (key.name === "n") {
+        cleanup();
+        resolve({ type: "new" });
         return;
       }
       if (key.name === "escape" || key.name === "q") {
@@ -374,57 +386,84 @@ async function selectWithArrows(params: {
 }
 
 export async function showSessionGui() {
-  const names = listSessions().sort((a, b) => a.localeCompare(b));
-  const active = getActiveSessionName();
-  const summaries = names.map((n) => summarizeSession(n));
+  let names = listSessions().sort((a, b) => a.localeCompare(b));
+  let active = getActiveSessionName();
+  let summaries = names.map((n) => summarizeSession(n));
   const modeRaw = String(cfg.get("theme_mode", "dark") || "dark").trim().toLowerCase();
   const mode: ThemeMode = modeRaw === "white" || modeRaw === "follow_windows" ? (modeRaw as ThemeMode) : "dark";
 
-  if (!summaries.length) {
-    const empty = renderScreen({
+  while (true) {
+    if (!summaries.length) {
+      const empty = renderScreen({
+        mode,
+        frame: 0,
+        title: "Session Picker",
+        description: ["No sessions found yet.", "Press N to create a new session."],
+        options: [],
+        selectedIndex: 0,
+        stepLabel: "Sessions",
+        hint: "Use /session new or press N.",
+      });
+      process.stdout.write(`${empty}\n`);
+      return;
+    }
+
+    const options: SelectOption[] = summaries.map((s) => ({
+      label: `${s.name} (${s.title})`,
+      description: `Date: ${s.created}`,
+    }));
+    const initialIndex = Math.max(0, summaries.findIndex((s) => s.name === active));
+
+    if (!process.stdin.isTTY) {
+      const text = summaries
+        .map((s) => `${s.name === active ? "*" : " "} ${s.name} (${s.title}) - ${s.created}`)
+        .join("\n");
+      process.stdout.write(`${text || "(no sessions)"}\n`);
+      return;
+    }
+
+    const picked = await selectWithArrows({
       mode,
-      frame: 0,
       title: "Session Picker",
-      description: ["No sessions found yet.", "Start a new conversation and it will appear here."],
-      options: [],
-      selectedIndex: 0,
+      description: ["Choose a session by Name (first prompt) and Date."],
+      options,
+      initialIndex,
+      animate: true,
       stepLabel: "Sessions",
-      hint: "Use /session new to create one.",
+      hint: "Use Up/Down, Enter select, D delete, N new session, Esc close.",
     });
-    process.stdout.write(`${empty}\n`);
+    if (picked === null) return;
+
+    if (picked.type === "new") {
+      const name = (await console.input("New session name (blank = timestamp) > ")).trim()
+        || `session_${Math.floor(Date.now() / 1000)}`;
+      setActiveSessionName(name);
+      clear();
+      printSuccess(`Started new session: ${name}`);
+      return;
+    }
+
+    const selected = summaries[picked.index];
+    if (!selected) return;
+
+    if (picked.type === "delete") {
+      const confirm = (await console.input(`Delete session "${selected.name}"? [y/N] > `)).trim().toLowerCase();
+      if (confirm !== "y" && confirm !== "yes") {
+        printWarning("Delete cancelled.");
+      } else {
+        deleteSession(selected.name);
+        printSuccess(`Deleted session: ${selected.name}`);
+      }
+      names = listSessions().sort((a, b) => a.localeCompare(b));
+      active = getActiveSessionName();
+      summaries = names.map((n) => summarizeSession(n));
+      continue;
+    }
+
+    if (selected.name !== active) {
+      setActiveSessionName(selected.name);
+      printSuccess(`Switched to session: ${selected.name}`);
+    }
     return;
-  }
-
-  const options: SelectOption[] = summaries.map((s) => ({
-    label: `${s.name} (${s.title})`,
-    description: `Date: ${s.created}`,
-  }));
-  const initialIndex = Math.max(0, summaries.findIndex((s) => s.name === active));
-
-  if (!process.stdin.isTTY) {
-    const text = summaries
-      .map((s) => `${s.name === active ? "*" : " "} ${s.name} (${s.title}) - ${s.created}`)
-      .join("\n");
-    process.stdout.write(`${text || "(no sessions)"}\n`);
-    return;
-  }
-
-  const pickedIdx = await selectWithArrows({
-    mode,
-    title: "Session Picker",
-    description: ["Choose a session by Name (first prompt) and Date."],
-    options,
-    initialIndex,
-    animate: true,
-    stepLabel: "Sessions",
-    hint: "Use Up/Down arrows to move, Enter to select, Esc to close.",
-  });
-  if (pickedIdx === null) return;
-
-  const picked = summaries[pickedIdx];
-  if (!picked) return;
-  if (picked.name !== active) {
-    setActiveSessionName(picked.name);
-    printSuccess(`Switched to session: ${picked.name}`);
   }
 }

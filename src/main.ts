@@ -5,6 +5,7 @@ import { getActiveSessionName } from "./memory";
 import { printPanel, printSessionStats, THEME } from "./ui/console";
 import { applyConfiguredThemeMode, runFirstLaunchOnboarding } from "./onboarding";
 import { ensureRuntimeAssets } from "./runtime_assets";
+import { eventBus } from "./core/events";
 
 type CliArgs = {
   query: string | null;
@@ -42,10 +43,11 @@ function parseArgs(argv: string[]): CliArgs {
 
 export async function runMain() {
   try {
-    if (process.stdout.isTTY) {
-      process.stdout.write("\x1Bc");
-      console.clear();
-    }
+    eventBus.emit({
+      phase: "thinking",
+      status: "start",
+      message: "Agent CLI startup",
+    });
     ensureRuntimeAssets();
     applyConfiguredThemeMode();
     const args = parseArgs(process.argv.slice(2));
@@ -58,12 +60,6 @@ export async function runMain() {
 
     if (!args.oneshot) {
       await runFirstLaunchOnboarding();
-    }
-
-    if (process.stdout.isTTY) {
-      // Ensure prior onboarding/welcome output does not remain on relaunch.
-      process.stdout.write("\x1Bc");
-      console.clear();
     }
 
     if (args.continueSession) {
@@ -98,10 +94,22 @@ export async function runMain() {
   } catch (error) {
     console.error("Agent CLI crashed with a fatal error:");
     console.error(error);
+    eventBus.emit({
+      phase: "error",
+      status: "end",
+      message: `Fatal error: ${String(error)}`,
+      success: false,
+    });
     process.exit(1);
   } finally {
     if (SESSION_STATS.input_tokens > 0) {
       printSessionStats(SESSION_STATS as unknown as Record<string, unknown>);
     }
+    eventBus.emit({
+      phase: "finished",
+      status: "end",
+      message: "Agent CLI shutdown",
+      success: true,
+    });
   }
 }

@@ -346,7 +346,12 @@ export class MissionBoard {
 }
 
 export async function promptMissionReply(question: string) {
-  printPanel(question, "AI Clarification Request", THEME.warning);
+  printPanel(
+    `AI Clarification Required\n\n${question}\n\nThis response is required before the agent can continue.`,
+    "AI Clarification Required",
+    THEME.error,
+    true,
+  );
   const answer = await consoleApi.input("Reply > ");
   if (!answer.trim()) {
     return await consoleApi.input("Reply > ");

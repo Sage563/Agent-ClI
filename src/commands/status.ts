@@ -1,7 +1,7 @@
 import { registry } from "./registry";
 import { cfg } from "../config";
 import { getProvider } from "../providers/manager";
-import { printInfo, printSuccess, printError, console } from "../ui/console";
+import { printInfo, printSuccess, printError } from "../ui/console";
 
 registry.register("/status", "Check connectivity to the active AI provider")(async () => {
     const providerName = cfg.getActiveProvider();

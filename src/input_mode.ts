@@ -19,12 +19,12 @@ function getToolbar() {
   const policy = ` | RUN:${cfg.getRunPolicy().toUpperCase()}`;
 
   const providerStyle = chalk.bold(themeColor(THEME.success)(provider));
-  const text = ` Provider: ${providerStyle} | Session: ${sessionName}${planning}${fast}${see}${policy} | @ to attach file | /help for commands `;
+  const text = ` Provider: ${providerStyle} | Session: ${sessionName}${planning}${fast}${see}${policy} | F6 IDE | @ to attach file | /help for commands `;
 
   // Create a full-width background
   const cols = process.stdout.columns || 80;
   // We need to carefully strip ANSI when calculating padding, but chalk handles BG colors well if we pad first
-  const plainTextLength = ` Provider: ${provider} | Session: ${sessionName}${planning}${fast}${see}${policy} | @ to attach file | /help for commands `.length;
+  const plainTextLength = ` Provider: ${provider} | Session: ${sessionName}${planning}${fast}${see}${policy} | F6 IDE | @ to attach file | /help for commands `.length;
   const padding = Math.max(0, cols - plainTextLength);
 
   const bg = themeBgColor(THEME.dim || "gray");
@@ -175,7 +175,7 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
     let lastEnterAt = 0;
     let lastActionWasInsertedEnter = false;
     const newlineSupport = cfg.isNewlineSupport();
-    const DOUBLE_ENTER_SUBMIT_MS = 400;
+    const DOUBLE_ENTER_SUBMIT_MS = 900;
 
     // Enable raw mode
     try { logUpdate.clear(); } catch { /* ignore */ }
@@ -282,6 +282,7 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
       key === "\x1b[1;5M" ||
       /^\x1b\[\d+;5[~u]$/.test(key) ||
       /^\x1b\[\d+;\d+;13~$/.test(key);
+    const isF6 = (key: string) => key === "\x1b[17~";
 
     const onData = (chunk: string) => {
       for (const key of splitChunk(chunk)) {
@@ -300,6 +301,17 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
         } catch {
           // ignore redraw failure and continue input collection
         }
+        continue;
+      }
+
+      if (isF6(key)) {
+        exec("code .", { timeout: 5_000 }, (error) => {
+          if (error) {
+            consoleUi.print(themeColor(THEME.error)("Failed to open IDE. Ensure `code` command is available."));
+          } else {
+            consoleUi.print(themeColor(THEME.success)("Opened IDE (VS Code)."));
+          }
+        });
         continue;
       }
 
@@ -336,6 +348,13 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
           const now = Date.now();
           const isQuickDoubleEnter = now - lastEnterAt <= DOUBLE_ENTER_SUBMIT_MS;
           const atEnd = realCursorPos === inputBuffer.length;
+          const endsWithNewline = atEnd && inputBuffer.endsWith("\n");
+          // If the user is on a blank trailing line and presses Enter again, submit regardless of speed.
+          if (endsWithNewline) {
+            cleanup();
+            resolve(inputBuffer);
+            return;
+          }
           if (isQuickDoubleEnter && atEnd && lastActionWasInsertedEnter) {
             cleanup();
             resolve(inputBuffer);
@@ -415,6 +434,7 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
           inAutocomplete = true;
           autocompleteStartIdx = realCursorPos; // It inserted at realCursorPos, so the '@' is at realCursorPos
           autocompleteSelectedIndex = 0;
+          updateAutocomplete();
         }
         if (inAutocomplete) updateAutocomplete();
         lastActionWasInsertedEnter = false;
@@ -472,8 +492,11 @@ export async function loop(cb: (text: string) => Promise<unknown> | unknown) {
       if (stripped.startsWith("!")) {
         const shellCommand = stripped.slice(1).trim();
         if (!shellCommand) continue;
+        const timeoutRaw = Number(cfg.get("command_timeout_ms", 30_000));
+        const timeoutUnlimited = !Number.isFinite(timeoutRaw) || timeoutRaw <= 0;
         await new Promise<void>((resolve) => {
-          exec(shellCommand, { timeout: 30_000 }, (error, stdout, stderr) => {
+          const execOptions = timeoutUnlimited ? {} : { timeout: Math.floor(timeoutRaw) };
+          exec(shellCommand, execOptions, (error, stdout, stderr) => {
             if (stdout) consoleUi.print(stdout);
             if (stderr) consoleUi.print(stderr);
             if (error) consoleUi.print(`Error: ${error.message}`);

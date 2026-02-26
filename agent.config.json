@@ -3,7 +3,7 @@
   "providers": {
     "ollama": {
       "endpoint": "localhost:11434",
-      "model": "qwen2.5-coder:14b",
+      "model": "qwen3:14b",
       "generation": {
         "temperature": 0.7,
         "num_ctx": 131072
@@ -39,7 +39,7 @@
   "web_browsing_allowed": true,
   "planning_mode": false,
   "max_budget": 25,
-  "mcp_enabled": false,
+  "mcp_enabled": true,
   "mcp_servers": {
     "memory": {
       "command": "npx",
@@ -129,6 +129,12 @@
   "reasoning_level": "high",
   "stream": true,
   "stream_print": true,
+  "stream_timeout_ms": 90000,
+  "stream_retry_count": 1,
+  "stream_render_fps": 24,
+  "command_timeout_ms": 30000,
+  "command_log_enabled": true,
+  "env_bridge_enabled": true,
   "mission_mode": false,
   "include_history": false,
   "theme_mode": "dark",

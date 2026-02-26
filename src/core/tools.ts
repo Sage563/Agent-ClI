@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import path from "path";
 import { search, searchNews } from "duck-duck-scrape";
 import { spawnSync } from "child_process";
+import type { SearchCitation } from "../types";
 
 const IGNORE_DIRS = new Set([
   ".git", "venv", "node_modules", "__pycache__", ".pytest_cache", ".vscode",
@@ -76,14 +77,23 @@ export async function webBrowse(urls: string[] | string) {
 }
 
 export async function webSearch(queries: string[] | string, searchType: "text" | "news" = "text", limit = 10) {
+  const structured = await webSearchStructured(queries, searchType, limit);
+  return formatSearchCitations(structured, searchType);
+}
+
+export async function webSearchStructured(queries: string[] | string, searchType: "text" | "news" = "text", limit = 10) {
   const list = Array.isArray(queries) ? queries : [queries];
   const maxResults = Math.min(Math.max(limit, 1), 20);
+  const out: Record<string, SearchCitation[]> = {};
 
   const tasks = list.map(async (query) => {
     try {
       const results = searchType === "news" ? await searchNews(query) : await search(query, { safeSearch: 0 });
       const items = (results as any).results || [];
-      if (!items.length) return `Query: ${query} (${searchType})\nNo results found.`;
+      if (!items.length) {
+        out[query] = [];
+        return;
+      }
 
       const deduped: any[] = [];
       const seen = new Set<string>();
@@ -96,21 +106,48 @@ export async function webSearch(queries: string[] | string, searchType: "text" |
         deduped.push(item);
       }
 
-      let out = `### Search Results for: ${query} (${searchType})\n\n`;
-      deduped.slice(0, maxResults).forEach((item: any, idx: number) => {
-        const title = (item.title || "No Title").trim();
-        const href = item.url || item.href || "No URL";
-        const body = (item.description || item.body || item.snippet || item.excerpt || "No snippet available.").trim();
-        const date = item.date ? ` [${item.date}]` : "";
-        const source = item.source ? `\n   - Source: ${String(item.source).trim()}` : "";
-        out += `${idx + 1}. **${title}**${date}\n   - URL: ${href}${source}\n   - Snippet: ${body}\n\n`;
-      });
-      return out;
+      out[query] = deduped.slice(0, maxResults).map((item: any, idx: number) => ({
+        index: idx + 1,
+        title: String(item?.title || "No Title").trim(),
+        url: String(item?.url || item?.href || "No URL").trim(),
+        snippet: String(item?.description || item?.body || item?.snippet || item?.excerpt || "No snippet available.").trim(),
+        source: item?.source ? String(item.source).trim() : undefined,
+        date: item?.date ? String(item.date).trim() : undefined,
+      }));
     } catch (error) {
-      return `### Search Results for: ${query}\nError: ${String(error)}`;
+      out[query] = [
+        {
+          index: 1,
+          title: "Search error",
+          url: "",
+          snippet: String(error),
+        },
+      ];
     }
   });
-  return (await Promise.all(tasks)).join("\n\n---\n\n");
+  await Promise.all(tasks);
+  return out;
+}
+
+export function formatSearchCitations(
+  grouped: Record<string, SearchCitation[]>,
+  searchType: "text" | "news" = "text",
+) {
+  const chunks: string[] = [];
+  for (const [query, citations] of Object.entries(grouped)) {
+    if (!citations.length) {
+      chunks.push(`### Search Results for: ${query} (${searchType})\nNo results found.`);
+      continue;
+    }
+    let block = `### Search Results for: ${query} (${searchType})\n\n`;
+    citations.forEach((citation) => {
+      const date = citation.date ? ` [${citation.date}]` : "";
+      const source = citation.source ? `\n   - Source: ${citation.source}` : "";
+      block += `${citation.index}. **${citation.title}**${date}\n   - URL: ${citation.url}${source}\n   - Snippet: ${citation.snippet}\n\n`;
+    });
+    chunks.push(block.trimEnd());
+  }
+  return chunks.join("\n\n---\n\n");
 }
 
 function isBinary(filePath: string) {

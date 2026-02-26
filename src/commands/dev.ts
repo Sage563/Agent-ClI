@@ -24,7 +24,7 @@ function redactSensitiveObj(obj: unknown): unknown {
   return obj;
 }
 
-function summarizeMissionData(data: unknown) {
+export function summarizeMissionData(data: unknown) {
   if (!data || typeof data !== "object") return data;
   const out: Record<string, unknown> = {};
   Object.entries(data as Record<string, unknown>).forEach(([k, v]) => {
@@ -40,7 +40,7 @@ function summarizeMissionData(data: unknown) {
   return redactSensitiveObj(out);
 }
 
-registry.register("/code", "Open VS Code")(() => {
+registry.register("/code", "Open VS Code", ["/ide", "/codex"])(() => {
   try {
     spawn("code", [process.cwd()], { cwd: process.cwd(), detached: true, stdio: "ignore" }).unref();
   } catch {
