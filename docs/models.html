@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Models & Providers | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html" class="active">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="contributing.html">Contributing</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>AI Providers & Models</h1>
+            <p>Agent CLI is provider-agnostic. You can easily switch between local open-source models and premium remote
+                APIs.</p>
+
+            <h2>Supported Providers</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 2rem 0;">
+                <div class="feature-card">
+                    <h3>Local (Ollama)</h3>
+                    <p>Run models like Qwen 2.5/3, Llama 3, or DeepSeek locally.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>OpenAI</h3>
+                    <p>High-performance models like GPT-4o and o1-mini.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Google Gemini</h3>
+                    <p>Gemini 1.5 Pro and Flash with large context windows.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Anthropic</h3>
+                    <p>Claude 3.5 Sonnet, known for exceptional coding ability.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>DeepSeek</h3>
+                    <p>Powerful and cost-efficient coding models.</p>
+                </div>
+            </div>
+
+            <h2>How to Switch</h2>
+            <p>Use the <code>/provider</code> command followed by the provider ID:</p>
+            <pre><code>/provider anthropic
+/model claude-3-5-sonnet-20241022</code></pre>
+
+            <h2>Advanced Model Parameters</h2>
+            <p>You can fine-tune how the models behave using core configuration keys. These are passed to the provider
+                during every generation turn.</p>
+            <ul>
+                <li><code>provider_temperature</code>: Controls randomness (0.0 to 1.0).</li>
+                <li><code>provider_top_p</code>: Nucleus sampling parameter.</li>
+                <li><code>provider_max_tokens</code>: Hard limit on AI response length.</li>
+            </ul>
+            <pre><code>/config provider_temperature 0.2
+/config provider_max_tokens 8000</code></pre>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

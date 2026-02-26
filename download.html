@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download | Agent CLI</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="docs/installation.html">Docs</a>
+                <a href="download.html" class="active">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero"
+        style="min-height: 40vh; display: flex; align-items: center; text-align: center; background: #000;">
+        <div class="container">
+            <h1>Get Started with Agent CLI</h1>
+            <p class="hero-subtitle">Download the latest release for your platform or build from source.</p>
+        </div>
+    </header>
+
+    <section>
+        <div class="container">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem;">
+                <div class="feature-card" style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;"></div>
+                    <h3>Windows</h3>
+                    <p style="margin-bottom: 1.5rem;">Standalone executable for Windows systems.</p>
+                    <a href="https://github.com/Sage563/Agent-ClI/releases/latest" class="btn btn-primary">Download
+                        .exe</a>
+                    <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-secondary);">Direct download via
+                        GitHub Releases</div>
+                </div>
+
+                <div class="feature-card" style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;"></div>
+                    <h3>macOS / Linux</h3>
+                    <p style="margin-bottom: 1.5rem;">Run via Node.js on Unix-based systems.</p>
+                    <pre
+                        style="background: #010409; padding: 0.5rem; border-radius: 4px; font-size: 0.8rem; text-align: left; margin-bottom: 1rem;"><code>git clone github.com/Sage563/Agent-ClI.git
+cd Agent-ClI
+npm install
+npm run build
+npm start</code></pre>
+                    <a href="docs/installation.html" class="btn btn-outline">Detailed Guide</a>
+                </div>
+
+                <div class="feature-card" style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;"></div>
+                    <h3>Source Code</h3>
+                    <p style="margin-bottom: 1.5rem;">Access the full source for customization.</p>
+                    <a href="https://github.com/Sage563/Agent-ClI/archive/refs/heads/main.zip"
+                        class="btn btn-outline">Download .zip</a>
+                    <a href="https://github.com/Sage563/Agent-ClI" class="btn btn-outline"
+                        style="margin-top: 0.5rem;">Star on GitHub</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="releases"
+        style="background: var(--panel-bg); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
+        <div class="container" style="max-width: 800px;">
+            <h2>Latest Release Highlights (v0.1.0)</h2>
+            <p style="margin: 1rem 0; color: var(--text-secondary);">Initial public release with core agentic
+                capabilities.</p>
+            <ul style="color: var(--text-secondary); margin-left: 1.5rem;">
+                <li>Autonomous code generation and file modification.</li>
+                <li>Support for local (Ollama) and remote (OpenAI, Gemini) providers.</li>
+                <li>Integrated Model Context Protocol (MCP) support.</li>
+                <li>Mission Mode for long-running autonomous tasks.</li>
+                <li>Interactive TUI with streaming status updates.</li>
+            </ul>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

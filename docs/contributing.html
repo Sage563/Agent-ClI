@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contributing | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="contributing.html" class="active">Contributing</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Contributing Guide</h1>
+            <p>Welcome! We're excited that you're interested in contributing to Agent CLI. This project thrives on
+                community input, and we want to make the process as smooth as possible.</p>
+
+            <h2>Core Technologies</h2>
+            <p>The project is written in <strong>TypeScript</strong> and runs on <strong>Node.js</strong>. We use
+                several key libraries to manage the TUI and file operations:</p>
+            <ul>
+                <li><strong>fs-extra:</strong> For robust file system interactions.</li>
+                <li><strong>path:</strong> Core Node.js path management.</li>
+                <li><strong>say:</strong> A text-to-speech cross-platform wrapper.</li>
+                <li><strong>mime-types:</strong> For identifying file structures automatically.</li>
+            </ul>
+
+            <h2>Development Workflow</h2>
+
+            <h3>1. Set Up Your Environment</h3>
+            <p>Fork the repository and clone it to your local machine. Ensure you have Node.js 20+ installed.</p>
+            <pre><code>git clone https://github.com/Sage563/Agent-ClI.git
+cd Agent-ClI
+npm install</code></pre>
+
+            <h3>2. Run in Development Mode</h3>
+            <p>Use the nodemon-powered dev script to automatically restart the agent when you make changes to the source
+                code.</p>
+            <pre><code>npm run dev</code></pre>
+
+            <h3>3. Project Structure</h3>
+            <ul>
+                <li><code>src/core/</code>: Core logic, agent state, and orchestration.</li>
+                <li><code>src/ui/</code>: TUI components, status panels, and output formatting.</li>
+                <li><code>src/providers/</code>: External AI service integrations.</li>
+                <li><code>scripts/</code>: Build utilities and runtime asset generation.</li>
+            </ul>
+
+            <h2>Coding Standards</h2>
+            <ul>
+                <li><strong>TypeScript:</strong> Use strong typing whenever possible. Avoid `any` types.</li>
+                <li><strong>Async/Await:</strong> Use modern async patterns for all I/O and API calls.</li>
+                <li><strong>Documentation:</strong> Document all public classes and functions using JSDoc-style
+                    comments.</li>
+                <li><strong>Error Handling:</strong> Use try/catch blocks effectively and provide meaningful error
+                    messages to the user.</li>
+            </ul>
+
+            <h2>Submitting a Pull Request</h2>
+            <ol>
+                <li>Create a feature branch (<code>git checkout -b feature/awesome-new-thing</code>).</li>
+                <li>Commit your changes with descriptive messages.</li>
+                <li>Ensure all existing tests pass (<code>npm test</code>).</li>
+                <li>Push to your fork and submit a Pull Request to our <code>main</code> branch.</li>
+            </ol>
+
+            <h2 style="margin-top: 3rem;">Community and Conduct</h2>
+            <p>We believe in a diverse and welcoming community. Please follow our Code of Conduct in all interactions.
+                If you have any questions, feel free to open a Discussion on GitHub or reach out to the maintainers.</p>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

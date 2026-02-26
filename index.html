@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent CLI | Autonomous AI Coding Agent</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="docs/installation.html">Docs</a>
+                <a href="download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="wiki.html">Wiki</a>
+                <div class="search-box">
+                    <input type="text" id="site-search" placeholder="Search... (/)"
+                        style="background: var(--panel-bg); border: 1px solid var(--border-color); color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">
+                </div>
+            </div>
+            <div class="menu-toggle">☰</div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container">
+            <h1>Autonomous AI Coding Agent</h1>
+            <p class="hero-subtitle">The terminal-first assistant that doesn't just suggest code—it executes real
+                project work, refactors, and deploys autonomously.</p>
+            <div class="hero-actions">
+                <a href="download.html" class="btn btn-primary">Download v0.1.0</a>
+                <a href="https://github.com/Sage563/Agent-ClI" class="btn btn-outline">View on GitHub</a>
+            </div>
+
+            <div class="code-preview">
+                <div class="code-header">
+                    <div class="dot dot-red"></div>
+                    <div class="dot dot-yellow"></div>
+                    <div class="dot dot-green"></div>
+                </div>
+                <pre><code><span style="color: var(--text-secondary);">$</span> agent-cli
+<span style="color: var(--accent-secondary);">agent-cli ></span> Create a new React component for a user profile card.
+<span style="color: var(--success-color);">[PLANNING]</span> Analyzing project structure...
+<span style="color: var(--success-color);">[WORKING]</span> Creating src/components/UserProfile.tsx
+<span style="color: var(--success-color);">[PROCESS]</span> Running tests...
+<span style="color: var(--accent-color);">✔</span> Component created and verified successfully.</code></pre>
+            </div>
+        </div>
+    </header>
+
+    <section id="features">
+        <div class="container">
+            <h2 style="text-align: center; margin-bottom: 3rem;">Engineered for Autonomy</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>True AI Agent</h3>
+                    <p>Unlike simple extensions, Agent CLI operates as a full agent. It maintains state, plans complex
+                        tasks, and executes them across multiple steps.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>Streaming Support</h3>
+                    <p>Real-time streaming output keeps you informed of every thought and action the AI takes, providing
+                        total transparency during execution.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>Code Generation</h3>
+                    <p>Sophisticated `changes[]` and `commands[]` focused behavior ensure that code is not just written,
+                        but applied and verified correctly.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>Local Model Support</h3>
+                    <p>Full integration with Ollama allows you to run powerful open-source models like Qwen3 locally,
+                        keeping your code private and secure.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>MCP Extensibility</h3>
+                    <p>Support for the Model Context Protocol (MCP) allows you to extend the agent's capabilities with
+                        custom tools and data sources.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"></div>
+                    <h3>Mission Mode</h3>
+                    <p>Define broad objectives and let the agent work autonomously for hours, handling everything from
+                        debugging to database migrations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="why">
+        <div class="container" style="max-width: 800px; text-align: center;">
+            <h2>Why Agent CLI?</h2>
+            <p style="margin-top: 1.5rem; color: var(--text-secondary);">Agent CLI bridge the gap between AI chat and
+                active development. It's built for developers who want to stay in the terminal and leverage the power of
+                LLMs to handle repetitive, complex, or tedious coding tasks with confidence.</p>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-col">
+                    <h4>Project</h4>
+                    <ul>
+                        <li><a href="docs/installation.html">Installation</a></li>
+                        <li><a href="docs/commands.html">Command Reference</a></li>
+                        <li><a href="docs/mcp.html">MCP Guide</a></li>
+                        <li><a href="docs/api.html">API Reference</a></li>
+                        <li><a href="docs/faq.html">FAQ</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a></li>
+                        <li><a href="https://github.com/Sage563/Agent-ClI/issues" target="_blank">Issue Tracker</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="docs/mcp.html">MCP Guide</a></li>
+                        <li><a href="docs/architecture.html">Architecture</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+                <p style="margin-top: 0.5rem; opacity: 0.6;">v0.1.0-alpha</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script src="js/search.js"></script>
+</body>
+
+</html>

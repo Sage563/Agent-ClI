@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Installation | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html" class="active">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="contributing.html">Contributing</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Installation</h1>
+            <p>Get Agent CLI up and running on your local machine in minutes.</p>
+
+            <h2>Prerequisites</h2>
+            <ul>
+                <li><strong>Node.js:</strong> Version 20.0.0 or higher is required.</li>
+                <li><strong>npm:</strong> Node package manager for installing dependencies.</li>
+                <li><strong>Git:</strong> Required for cloning the repository.</li>
+            </ul>
+
+            <h2>Step 1: Clone the Repository</h2>
+            <pre><code>git clone https://github.com/Sage563/Agent-ClI.git
+cd Agent-ClI</code></pre>
+
+            <h2>Step 2: Install Dependencies</h2>
+            <p>Run the following command in the project root to install all required libraries:</p>
+            <pre><code>npm install</code></pre>
+
+            <h2>Step 3: Verify the Installation</h2>
+            <p>Start the agent in development mode to ensure everything is working correctly:</p>
+            <pre><code>npm run dev</code></pre>
+
+            <h2>Common Installation Issues</h2>
+            <div class="option-panel"
+                style="background: rgba(210, 153, 34, 0.1); border-color: var(--warning-color); padding: 1rem; border-radius: 8px;">
+                <p><strong>EACCES Error:</strong> If you see permission errors during <code>npm install</code>, avoid
+                    using <code>sudo</code>. Instead, use a version manager like <code>nvm</code> to manage your Node.js
+                    installation.</p>
+            </div>
+            <div class="option-panel"
+                style="background: rgba(210, 153, 34, 0.1); border-color: var(--warning-color); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+                <p><strong>Python Dependency:</strong> Some underlying libraries (like <code>node-gyp</code>) may
+                    require Python to be present on your system for compilation of native modules.</p>
+            </div>
+
+            <h2>Post-Installation Next Steps</h2>
+            <p>Once installed, you should proceed to the <a href="setup.html">Setup Guide</a> to configure your AI
+                providers and environment variables.</p>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

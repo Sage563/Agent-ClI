@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API & Providers | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html" class="active">API Reference</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>API Reference (Providers)</h1>
+            <p>This guide provides technical details on how Agent CLI interfaces with different AI model providers. This
+                is essential for developers who want to integrate custom endpoints or understand the cost and
+                performance trade-offs.</p>
+
+            <h2>Standard Provider Interface</h2>
+            <p>Every provider in Agent CLI must implement a standard interface defined in
+                <code>src/core/types.ts</code>. This allows the core orchestrator to remain backend-agnostic.</p>
+
+            <pre><code>interface AIProvider {
+  name: string;
+  generate(payload: TaskPayload): Promise&lt;AIResponse&gt;;
+  stream(payload: TaskPayload, callback: (chunk: string) =&gt; void): Promise&lt;void&gt;;
+  listModels(): Promise&lt;string[]&gt;;
+}</code></pre>
+
+            <h2>Provider Details</h2>
+
+            <h3>1. Ollama (Offline First)</h3>
+            <p>The Ollama provider is the default for privacy-conscious users. It connects to a local server running at
+                <code>http://localhost:11434</code> by default.</p>
+            <ul>
+                <li><strong>Endpoint:</strong> <code>OLLAMA_ENDPOINT</code> or config <code>ollama_endpoint</code>.</li>
+                <li><strong>Model Support:</strong> Any model pulled via <code>ollama pull</code>.</li>
+                <li><strong>Features:</strong> Unlimited free generation, offline usage, absolute privacy.</li>
+            </ul>
+
+            <h3>2. OpenAI (Performance Standard)</h3>
+            <p>Connects to the official OpenAI API using their modern chat completion endpoints.</p>
+            <ul>
+                <li><strong>API Key:</strong> <code>OPENAI_API_KEY</code> or config <code>openai_api_key</code>.</li>
+                <li><strong>Recommended Models:</strong> <code>gpt-4o</code>, <code>gpt-4-turbo</code>,
+                    <code>o1-preview</code>.</li>
+                <li><strong>Config Option:</strong> <code>openai_org_id</code> for multi-org users.</li>
+            </ul>
+
+            <h3>3. Google Gemini (Large Context)</h3>
+            <p>Leverages Google's large context windows. Perfect for codebases that exceed 100k tokens.</p>
+            <ul>
+                <li><strong>API Key:</strong> <code>GEMINI_API_KEY</code> or config <code>gemini_api_key</code>.</li>
+                <li><strong>Integration:</strong> Supportsทั้ง Vertex AI and Google AI Studio endpoints.</li>
+                <li><strong>Recommended Model:</strong> <code>gemini-1.5-pro</code>.</li>
+            </ul>
+
+            <h3>4. Anthropic (Coding Specialist)</h3>
+            <p>Widely considered the best coding model in the current ecosystem.</p>
+            <ul>
+                <li><strong>API Key:</strong> <code>ANTHROPIC_API_KEY</code> or config <code>anthropic_api_key</code>.
+                </li>
+                <li><strong>Integration:</strong> Uses the Messages API with full tool-calling support.</li>
+                <li><strong>Recommended Model:</strong> <code>claude-3-5-sonnet-20241022</code>.</li>
+            </ul>
+
+            <h2>Payload Structure</h2>
+            <p>Every request sent to a provider is constructed by the Task Builder. It includes:</p>
+            <ul>
+                <li><strong>System Instructions:</strong> The core operating guidelines for the agent.</li>
+                <li><strong>Project Context:</strong> A hierarchical representation of files, directory listings, and
+                    active session history.</li>
+                <li><strong>User Query:</strong> The specific task or question from the TUI.</li>
+                <li><strong>Execution Metadata:</strong> OS version, current working directory, and environment details.
+                </li>
+            </ul>
+
+            <h2>Provider-Specific Config Options</h2>
+            <p>You can fine-tune provider behavior using the <code>/config</code> command:</p>
+            <pre><code>/config provider_temperature 0.7
+/config provider_max_tokens 4096
+/config provider_timeout_ms 60000</code></pre>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

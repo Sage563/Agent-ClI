@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Usage | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html" class="active">Advanced Usage</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Advanced Documentation</h1>
+            <p>Take your Agent CLI experience to the next level with advanced scripting, automated workflows, and
+                complex mission planning.</p>
+
+            <h2>Mission Management</h2>
+            <p>Missions are the most powerful feature of Agent CLI. A mission is a multi-turn autonomous project
+                execution.</p>
+
+            <h3>Defining a Mission</h3>
+            <p>You can start a mission with a broad goal. The agent will then break it down into phases.</p>
+            <pre><code>agent-cli --mission "Refactor the entire auth system to use JWT instead of sessions"</code></pre>
+
+            <h3>Phase Control</h3>
+            <p>The agent will pause after each major phase to let you review progress. You can use the following
+                commands to control the mission:</p>
+            <ul>
+                <li><code>/mission status</code> - See the current phase and progress.</li>
+                <li><code>/mission pause</code> - Temporarily stop the autonomous loop.</li>
+                <li><code>/mission resume</code> - Continue with the next planned step.</li>
+                <li><code>/mission skip</code> - Move to the next phase without finishing the current one.</li>
+            </ul>
+
+            <h2>Custom Tool Injection</h2>
+            <p>While MCP is the preferred way to add tools, you can also inject custom scripts directly into the agent's
+                runtime environment.</p>
+
+            <h3>The .agents.json File</h3>
+            <p>Place an <code>.agents.json</code> file in your project root to define project-specific tools and
+                instructions.</p>
+            <pre><code>{
+  "project_name": "My App",
+  "custom_tools": [
+    {
+      "name": "deploy_staging",
+      "command": "npm run deploy:staging",
+      "description": "Deploys the current project state to the staging server."
+    }
+  ]
+}</code></pre>
+
+            <h2>Automated Testing Integration</h2>
+            <p>You can configure the agent to automatically run tests after every file change. This is critical for
+                maintaining stability during large refactors.</p>
+            <pre><code>/config auto_verify true
+/config verify_command "npm test"</code></pre>
+
+            <h2>Prompt Engineering</h2>
+            <p>The agent's behavior is driven by its internal system prompt. Advanced users can override or append to
+                this prompt via the <code>agent.prompt.txt</code> file in the config directory.</p>
+            <h3>Instruction Hierarchy</h3>
+            <ol>
+                <li><strong>System Default:</strong> Core agentic behavior.</li>
+                <li><strong>Environment Overrides:</strong> OS-specific details.</li>
+                <li><strong>Project Instructions:</strong> Found in <code>.agents.json</code>.</li>
+                <li><strong>User session prompts:</strong> Provided via `/prompt` or initial input.</li>
+            </ol>
+
+            <h2 style="margin-top: 3rem;">CLI Flags Reference</h2>
+            <table class="cmd-table">
+                <thead>
+                    <tr>
+                        <th>Flag</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>--verbose</code></td>
+                        <td>Show detailed debugging logs in the terminal.</td>
+                    </tr>
+                    <tr>
+                        <td><code>--no-stream</code></td>
+                        <td>Disable streaming output (good for CI environments).</td>
+                    </tr>
+                    <tr>
+                        <td><code>--config &lt;path&gt;</code></td>
+                        <td>Use a custom configuration file path.</td>
+                    </tr>
+                    <tr>
+                        <td><code>--mission &lt;goal&gt;</code></td>
+                        <td>Initialize the agent with a long-running mission.</td>
+                    </tr>
+                    <tr>
+                        <td><code>--safe-mode</code></td>
+                        <td>Force the agent to ask for permission for EVERY command.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

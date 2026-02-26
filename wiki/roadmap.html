@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roadmap | Agent CLI Wiki</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .roadmap-item {
+            border-left: 2px solid var(--border-color);
+            padding-left: 2rem;
+            position: relative;
+            margin-bottom: 3rem;
+        }
+
+        .roadmap-item::before {
+            content: "";
+            width: 12px;
+            height: 12px;
+            background: var(--accent-color);
+            border-radius: 50%;
+            position: absolute;
+            left: -7px;
+            top: 8px;
+        }
+
+        .roadmap-item.completed::before {
+            background: var(--success-color);
+        }
+
+        .roadmap-date {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent-secondary);
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="../docs/installation.html">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html" class="active">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Technical Wiki</h4>
+            <ul>
+                <li><a href="../wiki.html">Architecture Overview</a></li>
+                <li><a href="design_philosophy.html">Design Philosophy</a></li>
+                <li><a href="security.html">Security Model</a></li>
+                <li><a href="roadmap.html" class="active">Roadmap</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Product Roadmap</h1>
+            <p>Our vision for the future of Agent CLI. We're building the most powerful terminal-native AI workforce.
+            </p>
+
+            <div class="roadmap-item completed">
+                <div class="roadmap-date">Q1 2026 (Completed)</div>
+                <h3>V1 Launch</h3>
+                <p>Initial release of the core orchestrator, TUI, and support for primary AI providers (Ollama, OpenAI,
+                    Gemini).</p>
+            </div>
+
+            <div class="roadmap-item">
+                <div class="roadmap-date">Q2 2026 (In Progress)</div>
+                <h3>Advanced Autonomy & MCP</h3>
+                <p>Implementation of "Mission Mode" for long-running tasks and deep integration with the Model Context
+                    Protocol (MCP) ecosystem.</p>
+            </div>
+
+            <div class="roadmap-item">
+                <div class="roadmap-date">Q3 2026</div>
+                <h3>Multi-Agent Orchestration</h3>
+                <p>Enable primary agents to spawn specialized sub-agents for specific tasks (e.g., a "Test Agent" or a
+                    "Refactor Agent") working in parallel.</p>
+            </div>
+
+            <div class="roadmap-item">
+                <div class="roadmap-date">Q4 2026</div>
+                <h3>V2 Prototype</h3>
+                <p>Moving beyond text: Vision capabilities for UI debugging and deeper IDE-level integrations.</p>
+            </div>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

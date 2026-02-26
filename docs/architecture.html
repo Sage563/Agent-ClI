@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html" class="active">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>System Architecture</h1>
+            <p>A deep dive into the inner workings of Agent CLI. Understanding the architecture is key to extending the
+                agent or contributing to the core.</p>
+
+            <h2>Overview</h2>
+            <p>Agent CLI is built on a decoupled, service-oriented architecture written entirely in TypeScript. It
+                prioritizes safety, transparency, and extensibility.</p>
+
+            <h3>The Core Loop</h3>
+            <p>The agent operates in a continuous "Sense-Plan-Act" loop:</p>
+            <ol>
+                <li><strong>Sense:</strong> The Task Builder gathers project context, including file contents, directory
+                    structures, and recent logs.</li>
+                <li><strong>Plan:</strong> The LLM processes the context and user request to generate a structured
+                    `TaskPayload` including proposed `changes[]` and `commands[]`.</li>
+                <li><strong>Act:</strong> The Execution Engine validates the instructions, applies file changes via the
+                    Applier, and runs shell commands.</li>
+            </ol>
+
+            <h2>Component Breakdown</h2>
+
+            <h3>1. The Orchestrator (src/core/agent.ts)</h3>
+            <p>The "brain" of the application. It manages session state, handles the dialogue loop, and coordinates
+                between the TUI and the AI providers. It also enforces the session's security policy.</p>
+
+            <h3>2. Task Builder (src/task_builder.ts)</h3>
+            <p>A sophisticated context-gathering engine. It doesn't just send raw strings; it intelligently selects
+                relevant files, truncates long outputs, and formats the project state into a structure the AI can easily
+                parse.</p>
+
+            <h3>3. File Applier (src/applier.ts)</h3>
+            <p>The safety layer for file modifications. Instead of simple overwrites, the Applier uses a diff-based
+                approach to ensure that code is inserted correctly. It also maintains an undo-stack, allowing the user
+                to revert changes instantly.</p>
+
+            <h3>4. Provider Framework (src/providers/)</h3>
+            <p>A standardized interface for different AI backends. Whether you're using Ollama's local API, OpenAI's
+                streaming REST API, or Gemini's Vertex AI, the core agent interacts with them through a consistent
+                `AIProvider` interface.</p>
+
+            <h3>5. MCP Connector (src/core/mcp.ts)</h3>
+            <p>The bridge to the Model Context Protocol. It dynamically loads MCP servers, translates their JSON-RPC
+                methods into agent tools, and injects their capabilities directly into the AI's prompt.</p>
+
+            <h2>Data Flow Diagram</h2>
+            <pre style="text-align: center; color: var(--accent-color);">
+[User Input] → [Agent Core] → [Task Builder] → [AI Provider]
+                                                    ↓
+[Undo Stack] ← [Applier] ← [Execution Engine] ← [AI Response]
+            </pre>
+
+            <h2>Security Philosophy</h2>
+            <p>The architecture is "Sandbox-First". The agent never has write access to your system unless explicitly
+                granted via the configuration or a session-level `/access` command. All file writes are staged and can
+                be reviewed before commitment.</p>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

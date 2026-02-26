@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Guide | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+
+        .feature-box {
+            border-left: 4px solid var(--accent-color);
+            padding-left: 1.5rem;
+            margin: 2rem 0;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html" class="active">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Feature Deep-Dive</h1>
+            <p>Explore the sophisticated mechanisms that make Agent CLI a powerful autonomous assistant.</p>
+
+            <h2>1. State-Aware Orchestration</h2>
+            <p>Unlike standard LLM interfaces, Agent CLI maintains a comprehensive session state. It remembers previous
+                commands, file contents it has read, and the current goal of your project.</p>
+            <div class="feature-box">
+                <h3>Implicit Memory</h3>
+                <p>The agent automatically summarizes long conversations to keep the most relevant details at the top of
+                    its context window, preventing "hallucinations" caused by context overflow.</p>
+            </div>
+
+            <h2>2. The Change Applier (Diff Engine)</h2>
+            <p>Applying code changes is the most critical task. Agent CLI doesn't just overwrite files; it uses a
+                proprietary diffing engine designed specifically for AI-generated code blocks.</p>
+            <ul>
+                <li><strong>Line-by-line validation:</strong> The applier ensures that the code it's replacing actually
+                    exists in the file.</li>
+                <li><strong>Partial matching:</strong> If the AI provides a slightly truncated version of a function,
+                    the engine can still find the correct location using fuzzy matching.</li>
+                <li><strong>Atomic Writes:</strong> Changes are written to a temporary buffer first, then moved to the
+                    final destination, preventing file corruption.</li>
+            </ul>
+
+            <h2>3. Autonomous Mission Mode</h2>
+            <p>Missions allow the agent to operate without constant user feedback. This is ideal for tasks that take
+                minutes or hours to complete.</p>
+            <pre><code>/mission "Fix all TypeScript lint errors in the src/core directory"</code></pre>
+            <p>In Mission Mode, the agent will:</p>
+            <ol>
+                <li>Run a lint command to find errors.</li>
+                <li>Analyze the output.</li>
+                <li>Plan a series of fixes.</li>
+                <li>Apply them one-by-one.</li>
+                <li>Re-run the linter to verify the fixes.</li>
+                <li>Continue until the objective is met or an unrecoverable error occurs.</li>
+            </ol>
+
+            <h2>4. Model Context Protocol Integration</h2>
+            <p>Agent CLI is one of the first terminal tools to fully adopt the MCP standard. This opens up a world of
+                third-party tools.</p>
+            <ul>
+                <li><strong>Dynamic Capability Loading:</strong> Install a server, and its tools are immediately
+                    available.</li>
+                <li><strong>Tool Documentation:</strong> The AI reads the documentation provided by the MCP server, so
+                    it knows exactly how to use every tool flawlessly.</li>
+                <li><strong>Resource Management:</strong> Read remote files or database schemas as if they were local
+                    text files.</li>
+            </ul>
+
+            <h2>5. Search-Enhanced Reasoning</h2>
+            <p>When you ask about a library the AI hasn't seen (like a new beta release), it uses the built-in search
+                tool.</p>
+            <div class="feature-box">
+                <h3>Contextual Web Search</h3>
+                <p>The agent searches the web, reads the top results, extracts the relevant code snippets, and
+                    integrates that knowledge directly into your project.</p>
+            </div>
+
+            <h2>6. TUI & Interactive Dashboard</h2>
+            <p>The terminal user interface is designed for clarity. It separates AI prose from technical logs and
+                execution status.</p>
+            <ul>
+                <li><strong>Status Panels:</strong> Monitor API cost, token usage, and command timers in real-time.</li>
+                <li><strong>Streaming Logs:</strong> See exactly what shell commands the AI is running in a dedicated
+                    window.</li>
+                <li><strong>Rich Formatting:</strong> Markdown support for code blocks, tables, and alerts directly in
+                    your shell.</li>
+            </ul>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

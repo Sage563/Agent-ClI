@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Config File | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .content pre {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .content code {
+            font-family: var(--font-mono);
+            color: var(--accent-secondary);
+        }
+
+        .option-panel {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            background: var(--panel-bg);
+        }
+
+        .option-name {
+            font-weight: 700;
+            color: var(--accent-color);
+            font-family: var(--font-mono);
+        }
+
+        .option-type {
+            color: var(--accent-secondary);
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html" class="active">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Configuration Reference</h1>
+            <p>Every aspect of Agent CLI can be fine-tuned. This page is a complete reference of every available
+                configuration option.</p>
+
+            <h2>General Settings</h2>
+
+            <div class="option-panel">
+                <span class="option-name">active_provider</span> <span class="option-type">string</span>
+                <p>The ID of the currently active model provider. (Default: "ollama")</p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">run_policy</span> <span class="option-type">"ask" | "always" | "never"</span>
+                <p>Determines if the agent requires permission before executing shell commands. (Default: "ask")</p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">stream</span> <span class="option-type">boolean</span>
+                <p>Enables or disables standard text streaming for AI responses. (Default: true)</p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">max_budget</span> <span class="option-type">number</span>
+                <p>The lifetime dollar budget for API usage in the current session. (Default: 0 - unlimited)</p>
+            </div>
+
+            <h2>User Interface Settings</h2>
+
+            <div class="option-panel">
+                <span class="option-name">ui_theme</span> <span class="option-type">"dark" | "light" | "terminal"</span>
+                <p>Changes the color scheme of the TUI. (Default: "dark")</p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">show_thinking_logs</span> <span class="option-type">boolean</span>
+                <p>Displays the internal steps the agent is taking during planning. (Default: true)</p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">audio_feedback</span> <span class="option-type">boolean</span>
+                <p>Enables text-to-speech feedback for major agent actions. (Default: false)</p>
+            </div>
+
+            <h2>Provider-Specific Settings</h2>
+
+            <h3>Ollama</h3>
+            <div class="option-panel">
+                <span class="option-name">ollama_endpoint</span> <span class="option-type">string (URL)</span>
+                <p>The URL of your local Ollama instance. (Default: "http://localhost:11434")</p>
+            </div>
+            <div class="option-panel">
+                <span class="option-name">ollama_model</span> <span class="option-type">string</span>
+                <p>The specific model tag to use for generation. (Default: "qwen3:14b")</p>
+            </div>
+
+            <h3>OpenAI</h3>
+            <div class="option-panel">
+                <span class="option-name">openai_api_key</span> <span class="option-type">string (API Key)</span>
+                <p>Your OpenAI secret API key.</p>
+            </div>
+            <div class="option-panel">
+                <span class="option-name">openai_model</span> <span class="option-type">string</span>
+                <p>The model ID to use (e.g., "gpt-4o").</p>
+            </div>
+
+            <h2>Security & Access</h2>
+
+            <div class="option-panel">
+                <span class="option-name">allowed_paths</span> <span class="option-type">string[]</span>
+                <p>An explicit allow-list of directories the agent is allowed to access. (Default: [current workspace])
+                </p>
+            </div>
+
+            <div class="option-panel">
+                <span class="option-name">env_bridge_enabled</span> <span class="option-type">boolean</span>
+                <p>If true, automatically loads API keys from your local .env file. (Default: true)</p>
+            </div>
+
+            <h2 style="margin-top: 3rem;">Environment Variables</h2>
+            <p>You can also set many of these via environment variables:</p>
+            <ul>
+                <li><code>AGENT_PROVIDER</code>: Overrides <code>active_provider</code>.</li>
+                <li><code>AGENT_POLICY</code>: Overrides <code>run_policy</code>.</li>
+                <li><code>AGENT_DEBUG</code>: Enables verbose logging if set to <code>true</code>.</li>
+            </ul>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

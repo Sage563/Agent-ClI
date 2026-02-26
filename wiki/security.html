@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Model | Agent CLI Wiki</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .security-alert {
+            background: rgba(210, 153, 34, 0.1);
+            border-left: 4px solid var(--warning-color);
+            padding: 1.5rem;
+            margin: 2rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="../docs/installation.html">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html" class="active">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Technical Wiki</h4>
+            <ul>
+                <li><a href="../wiki.html">Architecture Overview</a></li>
+                <li><a href="design_philosophy.html">Design Philosophy</a></li>
+                <li><a href="security.html" class="active">Security Model</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Security Model</h1>
+            <p>Safety is the primary inhibitor to broader AI adoption. Agent CLI addresses this with a multi-layered
+                security model designed to give you peace of mind.</p>
+
+            <div class="security-alert">
+                <strong>Sandbox-First Architecture:</strong> The agent operates in a restricted environment. It has zero
+                authority to perform destructive system actions (like formatting a drive or deleting your entire home
+                directory) by default.
+            </div>
+
+            <h2>1. Permission Policies</h2>
+            <p>We use a per-session permission model. You can adjust the strictness level at any time using the
+                <code>/access</code> command.</p>
+            <ul>
+                <li><strong>Read-Only:</strong> The agent can analyze your code but cannot modify a single character.
+                </li>
+                <li><strong>Selective Access:</strong> The agent must request access to specific directories or files.
+                </li>
+                <li><strong>Full Transparency:</strong> For trusted environments, allows the agent to modify files
+                    within the current workspace project root.</li>
+            </ul>
+
+            <h2>2. Data Privacy & Local Inference</h2>
+            <p>Agent CLI is the only professional-grade agent that defaults to local inference via
+                <strong>Ollama</strong>. This means your proprietary source code never leaves your local network. For
+                users requiring remote models, we enforce strict SSL/TLS encryption for all API traffic.</p>
+
+            <h2>3. Command Verification</h2>
+            <p>Unlike other CLI agents that might run shell commands in the background silently, Agent CLI explicitly
+                stages all shell commands in a dedicated TUI panel. In "Ask" mode, it waits for a physical keyboard
+                key-press (Y/N) before executing any external program.</p>
+
+            <h2>4. Secure Configuration Storage</h2>
+            <p>API keys and sensitive credentials are never stored in plain text in the workspace. They live in a
+                globally-secured <code>agent.config.json</code> file in your user's platform-specific application data
+                directory, with support for environment variable passthrough for CI/CD safety.</p>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

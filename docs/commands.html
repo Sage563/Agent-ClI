@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Commands | Agent CLI Docs</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <style>
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 2rem;
+            padding-top: calc(var(--nav-height) + 2rem);
+        }
+
+        .sidebar {
+            position: sticky;
+            top: calc(var(--nav-height) + 2rem);
+            height: fit-content;
+        }
+
+        .sidebar h4 {
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar ul li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar ul li a {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .sidebar ul li a.active {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .content h1 {
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        .content h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .content p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .cmd-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 2rem 0;
+            font-size: 0.9rem;
+        }
+
+        .cmd-table th,
+        .cmd-table td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .cmd-table th {
+            color: var(--text-primary);
+            background: var(--panel-bg);
+        }
+
+        .cmd-table code {
+            color: var(--accent-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .cmd-details h3 {
+            font-family: var(--font-mono);
+            color: var(--accent-color);
+            font-size: 1.25rem;
+            margin-top: 2rem;
+            border-bottom: none;
+        }
+    </style>
+</head>
+
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <span style="color: var(--accent-color);">[</span>Agent CLI<span
+                    style="color: var(--accent-color);">]</span>
+            </a>
+            <div class="nav-links">
+                <a href="installation.html" class="active">Docs</a>
+                <a href="../download.html">Download</a>
+                <a href="https://github.com/Sage563/Agent-ClI" target="_blank">GitHub</a>
+                <a href="../wiki.html">Wiki</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container docs-layout">
+        <aside class="sidebar">
+            <h4>Getting Started</h4>
+            <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="setup.html">Setup</a></li>
+            </ul>
+            <h4>Configuration</h4>
+            <ul>
+                <li><a href="config.html">Config File</a></li>
+                <li><a href="models.html">Models & Providers</a></li>
+            </ul>
+            <h4>Usage</h4>
+            <ul>
+                <li><a href="commands.html" class="active">All Commands</a></li>
+                <li><a href="features.html">Feature Guide</a></li>
+            </ul>
+            <h4>Deep Dive</h4>
+            <ul>
+                <li><a href="mcp.html">MCP Guide</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="advanced.html">Advanced Usage</a></li>
+                <li><a href="api.html">API Reference</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="troubleshooting.html">Troubleshooting</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <h1>Complete Command Reference</h1>
+            <p>A comprehensive list of all interactive commands available within the Agent CLI shell.</p>
+
+            <table class="cmd-table">
+                <thead>
+                    <tr>
+                        <th>Command</th>
+                        <th>Arguments</th>
+                        <th>Summary</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/help</code></td>
+                        <td>-</td>
+                        <td>Display the interactive help menu.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/provider</code></td>
+                        <td><code>&lt;id&gt;</code></td>
+                        <td>Switch to a specific AI backend.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/model</code></td>
+                        <td><code>&lt;tag&gt;</code></td>
+                        <td>Select a specific model version.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/config</code></td>
+                        <td><code>[key] [v]</code></td>
+                        <td>Manage global agent settings.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/access</code></td>
+                        <td><code>&lt;mode&gt;</code></td>
+                        <td>Toggle session security permissions.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/mission</code></td>
+                        <td><code>&lt;goal&gt;</code></td>
+                        <td>Start an autonomous task loop.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/mcp</code></td>
+                        <td><code>&lt;sub&gt;</code></td>
+                        <td>Interact with Model Context Protocol servers.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/undo</code></td>
+                        <td>-</td>
+                        <td>Revert the last batch of file modifications.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/list_diff</code></td>
+                        <td><code>[n]</code></td>
+                        <td>Review recently applied file changes.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/clear</code></td>
+                        <td>-</td>
+                        <td>Wipe the session terminal terminal history.</td>
+                    </tr>
+                    <tr>
+                        <td><code>/status</code></td>
+                        <td>-</td>
+                        <td>Show session health and API usage stats.</td>
+                    </tr>
+                    <tr>
+                        <td><code>!&lt;cmd&gt;</code></td>
+                        <td>-</td>
+                        <td>Direct shell command execution (shortcut).</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="cmd-details">
+                <h2>Detailed Breakdown</h2>
+
+                <h3>/provider &lt;name&gt;</h3>
+                <p>Changes the current AI backend. Supported values: <code>ollama</code>, <code>openai</code>,
+                    <code>anthropic</code>, <code>gemini</code>, <code>deepseek</code>.</p>
+
+                <h3>/config [key] [value]</h3>
+                <p>Allows real-time modification of the <code>agent.config.json</code> file. Running
+                    <code>/config</code> without arguments lists all current settings. Running <code>/config key</code>
+                    shows the value for that specific key.</p>
+
+                <h3>/access &lt;full | selective | prompt&gt;</h3>
+                <ul>
+                    <li><strong>full:</strong> The agent can read and write to any file in your project automatically.
+                    </li>
+                    <li><strong>selective:</strong> The agent can only touch files you've explicitly "shared" in the
+                        session.</li>
+                    <li><strong>prompt:</strong> The agent must ask for permission before every file read or write.</li>
+                </ul>
+
+                <h3>/mcp &lt;subcommand&gt; [args]</h3>
+                <ul>
+                    <li><code>/mcp add &lt;name&gt; &lt;cmd&gt; [args]</code>: Register a new MCP server.</li>
+                    <li><code>/mcp remove &lt;name&gt;</code>: Unregister an MCP server.</li>
+                    <li><code>/mcp list</code>: Show all active servers.</li>
+                    <li><code>/mcp tools</code>: Show all capabilities provided by active servers.</li>
+                    <li><code>/mcp inspect &lt;name&gt;</code>: Show technical details for a server.</li>
+                </ul>
+
+                <h3>/mission &lt;goal_description&gt;</h3>
+                <p>Initializes an autonomous workflow. The agent will ignore some "Ask" policies and attempt to solve
+                    the problem by creating a plan and iterating on tool results until the goal is achieved.</p>
+
+                <h3>/undo</h3>
+                <p>Agent CLI maintains a "transactional" history of file changes. If the AI makes a mistake or you're
+                    unhappy with a refactor, <code>/undo</code> will restore your files to their state before the last
+                    AI turn.</p>
+
+                <h3>!&lt;command&gt;</h3>
+                <p>Any input starting with <code>!</code> is executed directly in your system shell. This is useful for
+                    running builders, tests, or git commands without leaving the agent interface.</p>
+                <pre><code>!npm run build
+!git status</code></pre>
+            </div>
+        </main>
+    </div>
+
+    <footer style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2026 Agent CLI Project. Licensed under MIT.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>
