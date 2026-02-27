@@ -100,33 +100,35 @@ function titleByStyle(title: string, style?: string) {
   return chalk.bold(color(` ${title} `));
 }
 
-export function renderPanel(content: string, title = "", style?: string, fullWidth = false, fullHeight = false) {
+export function renderPanel(content: string, title = "", style?: string, _fullWidth = false, _fullHeight = false, boxed = false) {
+  const color = colorByName(style || THEME.primary);
+  const width = Math.max(20, (process.stdout.columns || 80) - 2);
   const body = renderMarkdown(content);
-  const borderColor = normalizeColorName(style || THEME.primary);
 
-  const opts: any = {
-    title: title ? titleByStyle(title, style) : undefined,
-    titleAlignment: "left",
-    borderStyle: "single",
-    borderColor,
-    padding: { top: 0, bottom: 0, left: 0, right: 0 },
-    margin: { top: 0, bottom: 0, left: 0, right: 0 },
-    dimBorder: false,
-  };
-
-  if (process.stdout.columns) {
-    // Default to width-aware rendering for all panels, with optional full-width intent.
-    opts.width = fullWidth ? terminalWidth() : Math.min(terminalWidth(), Math.max(48, terminalWidth()));
-  }
-  if (fullHeight && process.stdout.rows) {
-    opts.height = terminalHeight();
+  if (boxed) {
+    return boxen(body, {
+      title: title ? titleByStyle(title, style) : undefined,
+      titleAlignment: "left",
+      borderStyle: "round",
+      borderColor: normalizeColorName(style || THEME.primary),
+      padding: { top: 0, bottom: 0, left: 1, right: 1 },
+      margin: { top: 1, bottom: 1, left: 0, right: 0 },
+      width: Math.min(width + 2, 100),
+    });
   }
 
-  return boxen(body, opts);
+  if (!title) {
+    return `${color("\u2500".repeat(width))}\n${body}`;
+  }
+  const label = ` ${title} `;
+  const remaining = Math.max(0, width - label.length - 2);
+  const left = "\u2500\u2500";
+  const right = "\u2500".repeat(Math.max(0, remaining));
+  return `${color(`${left}${chalk.bold(label)}${right}`)}\n${body}`;
 }
 
-export function printPanel(content: string, title = "", style?: string, fullWidth = false, fullHeight = false) {
-  console.log(renderPanel(content, title, style, fullWidth, fullHeight));
+export function printPanel(content: string, title = "", style?: string, fullWidth = false, fullHeight = false, boxed = false) {
+  console.log(renderPanel(content, title, style, fullWidth, fullHeight, boxed));
 }
 
 export function printError(msg: string) {
@@ -152,7 +154,7 @@ export function printActivity(msg: string) {
 export function printRule(label = "", style?: string) {
   const width = Math.max(20, (process.stdout.columns || 80) - 2);
   const color = colorByName(style || THEME.dim || "gray");
-  const line = "─".repeat(Math.max(0, width - (label ? label.length + 2 : 0)));
+  const line = "\u2500".repeat(Math.max(0, width - (label ? label.length + 2 : 0)));
   const text = label ? `${label} ${line}` : line;
   console.log(color(text));
 }
@@ -203,6 +205,31 @@ export function clearScreen() {
   consoleApi.clear();
 }
 
+let thinkingTimer: NodeJS.Timeout | null = null;
+
+export function startThinking() {
+  if (thinkingTimer || PROMPT_INPUT_ACTIVE) return;
+  let frame = 0;
+  const chars = 12;
+  const equals = 6;
+  thinkingTimer = setInterval(() => {
+    const pos = Math.abs((frame % ((chars - equals) * 2)) - (chars - equals));
+    const leftSpace = " ".repeat(pos);
+    const rightSpace = " ".repeat(chars - equals - pos);
+    const bar = `[${leftSpace}${"=".repeat(equals)}${rightSpace}]`;
+    logUpdate(`${chalk.bold(themeColor(THEME.secondary)("AI THINKING"))} ${chalk.bold(themeColor(THEME.primary)(bar))}`);
+    frame += 1;
+  }, 100);
+}
+
+export function stopThinking() {
+  if (thinkingTimer) {
+    clearInterval(thinkingTimer);
+    thinkingTimer = null;
+    logUpdate.clear();
+  }
+}
+
 export async function liveStatus(msg: string, title = "Working", fn?: () => Promise<void>) {
   const text = `[${title}] ${msg}`;
   const spinnerFrames = ["-", "\\", "|", "/"];
@@ -246,91 +273,57 @@ export class MissionBoard {
     live_field?: string;
     live_text?: string;
   }) {
-    if (args.tasks) this.tasks = args.tasks;
-    if (typeof args.thought === "string") this.thought = args.thought;
-    if (typeof args.status === "string") this.status = args.status;
+    if (args.tasks) {
+      const oldDone = this.tasks.filter(t => t.done).length;
+      const newDone = args.tasks.filter(t => t.done).length;
+      if (newDone > oldDone || args.tasks.length !== this.tasks.length) {
+        const total = args.tasks.length;
+        const progress = this.renderProgressBar(newDone, total, 20);
+        console.log(chalk.bold(`\nTask Progress: ${progress} (${newDone}/${total})`));
+      }
+      this.tasks = args.tasks;
+    }
+    if (typeof args.thought === "string" && args.thought !== this.thought) {
+      this.thought = args.thought;
+    }
+    if (typeof args.status === "string" && args.status !== this.status) {
+      this.status = args.status;
+      console.log(chalk.bold(themeColor(args.status_style || THEME.primary)(`[MISSION STATUS] ${this.status}`)));
+    }
     if (typeof args.status_style === "string") this.statusStyle = args.status_style;
     if (typeof args.live_field === "string") this.liveField = args.live_field;
     if (typeof args.live_text === "string") this.liveText = args.live_text;
     if (args.log) {
       this.logs.push(args.log);
-      if (this.logs.length > 15) this.logs.shift();
+      console.log(themeColor(THEME.dim)(` \u2022 ${args.log}`));
+      if (this.logs.length > 50) this.logs.shift();
     }
-    this.flush();
   }
 
-  setStreaming(active: boolean) {
-    this.streaming = active;
-    this.flush();
+  setStreaming(_active: boolean) {
+    // No-op for appended mode
   }
 
   markTaskDone(taskIndex: number) {
     if (this.tasks[taskIndex]) {
       this.tasks[taskIndex].done = true;
-      this.flush();
+      const total = this.tasks.length;
+      const done = this.tasks.filter(t => t.done).length;
+      const progress = this.renderProgressBar(done, total, 20);
+      console.log(chalk.green(`\u2713 Task Completed: ${this.tasks[taskIndex].text}`));
+      console.log(chalk.bold(`Task Progress: ${progress} (${done}/${total})`));
     }
   }
 
   private renderProgressBar(done: number, total: number, width = 24) {
-    if (total <= 0) return `${"░".repeat(width)} 0%`;
+    if (total <= 0) return `${"\u2591".repeat(width)} 0%`;
     const ratio = Math.max(0, Math.min(1, done / total));
     const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
-    return `${"█".repeat(filled)}${"░".repeat(Math.max(0, width - filled))} ${Math.round(ratio * 100)}%`;
-  }
-
-  private render() {
-    const totalTasks = this.tasks.length;
-    const doneTasks = this.tasks.filter((task) => Boolean(task.done)).length;
-    const pendingTasks = Math.max(0, totalTasks - doneTasks);
-    const taskLines = this.tasks.length
-      ? this.tasks
-        .slice(0, 12)
-        .map((task, idx) => `${task.done ? "✓" : "•"} ${idx + 1}. ${task.text}`)
-        .join("\n")
-      : "_No tasks yet..._";
-    const thoughtPreview = this.thought
-      ? String(this.thought).split(/\r?\n/).slice(0, 8).join("\n")
-      : "_No thought yet..._";
-    const livePreview = this.liveText
-      ? String(this.liveText).split(/\r?\n/).slice(-12).join("\n")
-      : "_No live content..._";
-    const activityLines = this.logs.slice(-8).map((l) => `• ${l}`).join("\n") || "_No activity yet..._";
-    const statusBadge = chalk.bold(themeBgColor(this.statusStyle || THEME.primary)(` ${this.status} `));
-    const streamingBadge = this.streaming
-      ? ` ${chalk.bold(themeBgColor(THEME.accent || "cyan")(" STREAMING "))}`
-      : "";
-    const progress = this.renderProgressBar(doneTasks, totalTasks, 26);
-    const lines = [
-      `${chalk.bold(this.title)}  ${statusBadge}${streamingBadge}`,
-      `${themeColor(THEME.dim)("Progress")}  ${progress}`,
-      `${themeColor(THEME.dim)("Tasks")}  ${doneTasks}/${totalTasks} done  •  ${pendingTasks} pending`,
-      "",
-      `${themeColor(THEME.primary)("PLAN")}`,
-      taskLines,
-      "",
-      `${themeColor(THEME.secondary)("THOUGHT")}`,
-      thoughtPreview,
-      "",
-      `${themeColor(THEME.warning)(`LIVE ${this.liveField ? `(${this.liveField})` : ""}`.trim())}`,
-      livePreview,
-      "",
-      `${chalk.bold.italic(themeColor(THEME.dim)("ACTIVITY"))}`,
-      activityLines,
-    ];
-    return boxen(renderMarkdown(lines.join("\n")), {
-      borderStyle: "single",
-      padding: { top: 0, bottom: 0, left: 0, right: 0 },
-      borderColor: normalizeColorName(this.statusStyle || THEME.primary),
-      margin: 0,
-      width: terminalWidth(),
-      height: terminalHeight(),
-      float: "left",
-    });
+    return `${"\u2588".repeat(filled)}${"\u2591".repeat(Math.max(0, width - filled))} ${Math.round(ratio * 100)}%`;
   }
 
   flush() {
-    if (PROMPT_INPUT_ACTIVE) return;
-    logUpdate(this.render());
+    // No-op for appended mode
   }
 
   activate() {

@@ -5,7 +5,6 @@ import path from "path";
 import { createHash } from "crypto";
 import { cfg } from "../config";
 import { build } from "../task_builder";
-import { apply } from "../applier";
 import {
   add,
   compactSession,
@@ -19,20 +18,34 @@ import {
 } from "../memory";
 import { calculateCost } from "../cost";
 import { parseJsonBestEffort, sanitizeAiEditedContent, speakText } from "./utils";
-import { webBrowse, webSearch, searchProject, indexProject, lintProject } from "./tools";
+import {
+  webBrowse,
+  webSearch,
+  searchProject,
+  indexProject,
+  lintProject,
+  gitStatus,
+  gitLog,
+  gitDiff,
+  createFile,
+  moveFile,
+  deleteFile
+} from "./tools";
+import { apply, undoLastApply } from "../applier";
 import { isFullAccess } from "./permissions";
 import { intel } from "./intelligence";
 import { manager as procManager } from "./process";
-import type { ExecutionEvent, MissionData, SessionStats, TaskChange, TaskCommand, TaskPayload } from "../types";
+import type { ExecutionEvent, MissionData, SessionEntry, SessionStats, TaskChange, TaskCommand, TaskPayload } from "../types";
 import { getProvider } from "../providers/manager";
 import { registry } from "../commands/registry";
-import { displayThinking, showDiff } from "../ui/agent_ui";
+import { displayThinking, promptConfirmEdit, showDiff } from "../ui/agent_ui";
 import { renderWorkspaceLayout } from "../ui/layout";
 import {
   MissionBoard,
   THEME,
   console,
   isPromptInputActive,
+  liveStatus,
   printActivity,
   printError,
   printInfo,
@@ -40,6 +53,8 @@ import {
   renderPanel,
   printSuccess,
   printWarning,
+  startThinking,
+  stopThinking,
 } from "../ui/console";
 import { DEBUG_HISTORY } from "../commands/dev";
 import { getRuntimePrompt } from "../runtime_assets";
@@ -166,6 +181,13 @@ const STREAM_TOOL_KEYS = [
   "terminal_kill",
   "index_project",
   "lint_project",
+  "git_status",
+  "git_log",
+  "git_diff",
+  "create_file",
+  "move_file",
+  "delete_file",
+  "apply_undo",
 ];
 
 export class StreamingJsonObserver {
@@ -513,6 +535,50 @@ function stripResponseWrapperText(value: string) {
   return out.trim();
 }
 
+function cleanVisibleAssistantText(value: string) {
+  let out = stripResponseWrapperText(value || "");
+  if (!out) return "";
+
+  const parsed = parseJsonBestEffort(out) as Record<string, unknown> | null;
+  if (parsed && typeof parsed.response === "string") {
+    out = String(parsed.response || "");
+  }
+
+  out = normalizeDisplayNewlines(out);
+  out = out.replace(/^\s*"/, "").replace(/"\s*,?\s*$/, "");
+  out = out.replace(/"\s*,\s*$/, "");
+  out = out.replace(/\\$/, "");
+  out = out.replace(
+    /\n?\s*"(thought|plan|self_critique|ask_user|changes|commands|context|request_files|web_search|web_browse|search_project)"\s*:\s*[\s\S]*$/i,
+    "",
+  );
+  return out.trim();
+}
+
+function extractThinkBlocks(value: string) {
+  const raw = String(value || "");
+  if (!raw) return { response: "", thinking: "" };
+
+  const thoughts: string[] = [];
+  let response = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_match, inner: string) => {
+    thoughts.push(String(inner || ""));
+    return "";
+  });
+
+  const lower = response.toLowerCase();
+  const openIdx = lower.lastIndexOf("<think>");
+  if (openIdx >= 0) {
+    const closeIdx = lower.indexOf("</think>", openIdx);
+    if (closeIdx < 0) {
+      thoughts.push(response.slice(openIdx + "<think>".length));
+      response = response.slice(0, openIdx);
+    }
+  }
+
+  const thinking = thoughts.join("\n").replace(/<\/?think>/gi, "").trim();
+  return { response, thinking };
+}
+
 function sanitizeStreamFieldPreview(field: "response" | "thought" | "plan" | "ask_user", value: string) {
   const raw = normalizeDisplayNewlines(String(value || ""));
   if (!raw.trim()) return "";
@@ -525,22 +591,25 @@ function sanitizeStreamFieldPreview(field: "response" | "thought" | "plan" | "as
   const prefix = new RegExp(`^\\s*\\{?\\s*"?${field}"?\\s*:\\s*`, "i");
   if (prefix.test(out)) out = out.replace(prefix, "");
   out = out.replace(/^\s*"/, "");
-  out = out.replace(/"\s*[,}]?\s*$/, "");
 
-  if (field === "response") {
-    // Trim accidental schema spillover when partial JSON tails leak into response preview.
-    const sameLineLeak = out.search(/",\s*"[a-zA-Z_][a-zA-Z0-9_]*"\s*:/);
-    if (sameLineLeak > 0) {
-      out = out.slice(0, sameLineLeak);
-    }
-    const nextLineLeak = out.search(/\n\s*"[a-zA-Z_][a-zA-Z0-9_]*"\s*:/);
-    if (nextLineLeak > 0) {
-      out = out.slice(0, nextLineLeak);
+  // Aggressive cleanup: remove obvious JSON field tails
+  out = out.replace(/"\s*[,}]\s*"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*:\s*.*$/, ""); // Removes ", "thought": ... or ", "mode": ...
+  out = out.replace(/"\s*[,}]\s*$/, "");
+
+  if (field === "response" || field === "thought") {
+    // Trim Accidental schema spillover when partial JSON tails leak into preview.
+    const leakPattern = /"?\s*,\s*"[a-zA-Z_][a-zA-Z0-9_]*"\s*:/;
+    const leakIdx = out.search(leakPattern);
+    if (leakIdx > 0) {
+      out = out.slice(0, leakIdx);
     }
     out = out.replace(/",?\s*$/, "");
   }
 
-  return out;
+  if (field === "response") {
+    return cleanVisibleAssistantText(out);
+  }
+  return out.trim();
 }
 
 function formatExecutionActivity(event: ExecutionEvent) {
@@ -666,6 +735,7 @@ type HandleArgs = {
   __lastLintDigest?: string;
   __lintAppliedCount?: number;
   __lintRecoveryUsed?: boolean;
+  __autoWebSearchUsed?: boolean;
 };
 
 function buildPlanMarkdown(userInput: string, planBody: string, thoughtBody: string) {
@@ -776,22 +846,22 @@ async function getDynamicPrompt(text: string) {
 
   prompt +=
     "\n\n[CODE-FIRST EXECUTION POLICY]\n" +
-    "Default to concrete action over explanation. You are a highly autonomous agent.\n" +
-    "- If a task requires searching, use `web_search` or `search_project` until you have enough info.\n" +
-    "- For implementation/fix/refactor tasks, return actionable `changes[]` and/or `commands[]`.\n" +
-    "- You can include multiple `changes[]` in a single response to fix multiple issues or files.\n" +
-    "- In `changes[]`, the `edited` content is applied to ALL occurrences of `original` in the file. Choose unique snippets if you only want to change one spot.\n" +
-    "- Support for `\\n` as a newline is enabled. Use it to structure your text, but prioritize valid JSON escaping.\n" +
+    "Default to action over explanation. You are a highly autonomous agent.\n" +
+    "- Use `web_search`/`search_project` to gather context before acting.\n" +
+    "- For time-sensitive or external facts (latest/current/today/news/prices/releases/docs), run `web_search` first before finalizing `response`.\n" +
+    "- Prefer web results with citations when user asks for real-world facts outside the local repo.\n" +
+    "- Return actionable `changes[]` and/or `commands[]` for implementation tasks.\n" +
+    "- If the user asks to create/generate an example file, return it in `changes[]` (with a concrete file path), not only in `response`.\n" +
+    "- Multiple `changes[]` entries per response are supported (multi-file edits).\n" +
+    "- In `changes[]`, `edited` replaces ALL occurrences of `original` in the file. Use unique snippets.\n" +
     "- Do not return prose-only implementation plans in apply mode.\n" +
-    "- Ask clarifying questions only if a blocking ambiguity or safety concern exists.\n" +
-    "- Minimize narrative explanation unless the user explicitly asks for explanation.\n" +
-    "- When work is complete, include a concise completion summary in `response`.\n" +
+    "- Minimize narrative unless explicitly requested.\n" +
     "\n\n[STRICT OUTPUT SCHEMA]\n" +
     "Return ONE JSON object only (no markdown/code fences). " +
     "Prefer this exact shape: " +
     `{"response":"string","thought":"string optional","plan":"string optional","self_critique":"string optional","ask_user":"string|string[] optional","ask_user_questions":[],"request_files":[],"web_search":[],"web_browse":[],"search_project":"string optional","changes":[],"commands":[]${mcpSchema}}.\n` +
     "Use `response` as the main answer field. " +
-    "Write `response` in clean Markdown (headings/lists/code fences when useful). " +
+    "Your `response` is rendered with full Markdown (headings, lists, code fences, bold, italic, tables, links). Use formatting to make answers clear and scannable. " +
     "Do not use alternate answer keys unless unavoidable.";
   return prompt;
 }
@@ -878,32 +948,6 @@ export async function askYesNo(
     if (["y", "yes"].includes(answer)) return true;
     if (["n", "no"].includes(answer)) return false;
     printWarning("Please reply with y or n.");
-  }
-}
-
-type ChangeDecision = "yes" | "no" | "all" | "none" | "preview";
-
-async function askChangeDecision(change: TaskChange, existed: boolean, idx: number, total: number): Promise<ChangeDecision> {
-  const action = existed ? "Edit" : "Create";
-  const sizeHint = `${(change.edited || "").split(/\r?\n/).length} line(s)`;
-  const summary =
-    existed
-      ? `${action} \`${change.file}\` (${sizeHint}).`
-      : `${action} \`${change.file}\` (${sizeHint}). Missing folder(s) will be created automatically.`;
-  printPanel(
-    `${summary}\n\nChoose:\n- \`y\` accept this file\n- \`n\` skip this file\n- \`a\` accept all remaining\n- \`s\` skip all remaining\n- \`p\` preview this diff`,
-    `Change ${idx}/${total}`,
-    existed ? THEME.accent : THEME.warning,
-    true,
-  );
-  while (true) {
-    const answer = (await askInput("Decision [y/n/a/s/p] > ")).trim().toLowerCase();
-    if (!answer || answer === "y" || answer === "yes") return "yes";
-    if (answer === "n" || answer === "no") return "no";
-    if (answer === "a" || answer === "all") return "all";
-    if (answer === "s" || answer === "skip-all" || answer === "none") return "none";
-    if (answer === "p" || answer === "preview") return "preview";
-    printWarning("Use y, n, a, s, or p.");
   }
 }
 
@@ -1188,21 +1232,7 @@ function buildToolFollowupText(baseText: string, toolResults: Record<string, unk
   ].join("\n\n");
 }
 
-export function renderStreamDashboard(params: {
-  provider: string;
-  response: string;
-  thought: string;
-  plan: string;
-  activity: string[];
-}) {
-  const { provider, response, thought, plan, activity } = params;
-  const responseBox = renderPanel(truncateForStream(response || "_waiting for output..._", 1500), "Stream: Output", "green", true);
-  const thoughtBox = renderPanel(truncateForStream(thought || "_waiting for thought..._", 900), "Stream: Thought", THEME.secondary, true);
-  const planBox = renderPanel(truncateForStream(plan || "_waiting for plan..._", 900), "Stream: Plan", THEME.accent, true);
-  const activityText = activity.length ? activity.map((a) => `- ${a}`).join("\n") : "_no activity yet..._";
-  const activityBox = renderPanel(activityText, `Stream: Activity (${provider})`, THEME.warning, true);
-  return [responseBox, thoughtBox, planBox, activityBox].join("\n");
-}
+// Stream dashboard logic removed in favor of direct stdout streaming.
 
 import { runMcpTool } from "../mcp_client";
 
@@ -1288,6 +1318,27 @@ function hasToolIntent(data: Record<string, any>) {
     (Array.isArray(data.commands) && data.commands.length) ||
     (Array.isArray(data.changes) && data.changes.length),
   );
+}
+
+function shouldAutoWebSearchForPrompt(text: string) {
+  const raw = String(text || "").trim();
+  if (!raw) return false;
+  const low = raw.toLowerCase();
+
+  const explicitWeb =
+    /\b(web search|search the web|look up|google|internet|online|browse the web|find sources)\b/i.test(raw) ||
+    /https?:\/\//i.test(raw);
+  const freshnessSignals =
+    /\b(latest|today|current|news|headline|price|market|weather|release date|version|update)\b/i.test(raw);
+  const factualQuestion = /\b(who is|what is|when is|where is|how much)\b/i.test(raw);
+  const codeHeavy =
+    /\b(file|files|code|function|class|refactor|bug|fix|implement|typescript|javascript|python|java|rust|go|sql|json|yaml|repo|project)\b/i.test(
+      raw,
+    );
+
+  if (explicitWeb) return true;
+  if ((freshnessSignals || factualQuestion) && !codeHeavy) return true;
+  return false;
 }
 
 function detectEditClaimWithoutChanges(responseMsg: string, responseText: string, changes: TaskChange[]) {
@@ -1599,6 +1650,54 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
     }
   }
 
+  if (data.git_status) {
+    updateStatus("Checking git status...");
+    markToolResult("git_status");
+    missionResults.git_status = gitStatus();
+  }
+  if (data.git_log) {
+    updateStatus("Reading git log...");
+    markToolResult("git_log");
+    missionResults.git_log = gitLog(Number(data.git_log_limit || 10));
+  }
+  if (data.git_diff) {
+    updateStatus("Reading git diff...");
+    markToolResult("git_diff");
+    missionResults.git_diff = gitDiff(Boolean(data.git_diff_staged));
+  }
+  if (data.create_file && typeof data.create_file === "object") {
+    const file = String(data.create_file.file || "").trim();
+    const content = String(data.create_file.content || "");
+    if (file) {
+      updateStatus(`Creating file: ${file}...`);
+      markToolResult(`create_file:${file}`);
+      missionResults.file_creation = createFile(file, content);
+    }
+  }
+  if (data.move_file && typeof data.move_file === "object") {
+    const source = String(data.move_file.source || "").trim();
+    const destination = String(data.move_file.destination || "").trim();
+    if (source && destination) {
+      updateStatus(`Moving file from ${source} to ${destination}...`);
+      markToolResult(`move_file:${source}`);
+      missionResults.file_move = moveFile(source, destination);
+    }
+  }
+  if (data.delete_file) {
+    const file = String(data.delete_file.file || data.delete_file).trim();
+    if (file) {
+      updateStatus(`Deleting file: ${file}...`);
+      markToolResult(`delete_file:${file}`);
+      missionResults.file_deletion = deleteFile(file);
+    }
+  }
+  if (data.apply_undo) {
+    updateStatus("Undoing last file changes...");
+    markToolResult("apply_undo");
+    const ok = undoLastApply();
+    missionResults.undo_result = ok ? "Successfully undone last batch of changes." : "Nothing to undo.";
+  }
+
   if (asyncTasks.length) {
     await Promise.all(asyncTasks);
   }
@@ -1616,7 +1715,7 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
 }
 
 export async function handle(text: string, args?: HandleArgs, missionData?: MissionData): Promise<Record<string, any> | null | undefined> {
-  const safeArgs = args || { yes: false, fast: false, plan: false };
+  const safeArgs: HandleArgs = { yes: false, fast: false, plan: false, ...(args || {}) };
   const normalized = text.trim().toLowerCase();
 
   if (normalized === "/sesssion_gui" || normalized === "/session_gui") {
@@ -1712,7 +1811,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   if (!isPlanOnly && !safeArgs.__planningPass && Boolean(cfg.get("auto_compact_enabled", true))) {
     const active = load();
     const session = Array.isArray(active.session) ? active.session : [];
-    const used = session.reduce((acc, msg) => acc + estimateTokens(String(msg.content || "")), 0);
+    const used = session.reduce((acc: number, msg: SessionEntry) => acc + estimateTokens(String(msg.content || "")), 0);
     const model = cfg.getModel(providerName);
     const window = estimateContextWindow(providerName, model);
     const thresholdPct = Math.max(1, Math.min(100, Number(cfg.get("auto_compact_threshold_pct", 90))));
@@ -1859,45 +1958,52 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     }
     return deduped.slice(-Math.max(1, Math.floor(limit)));
   };
-  const renderLiveWorkspace = () => {
-    if (MISSION_BOARD || streamUiDisabledForTurn || isPromptInputActive()) return;
-    const displayResponse = stripResponseWrapperText(sanitizeStreamFieldPreview("response", streamedResponse || ""));
-    const displayThought = sanitizeStreamFieldPreview("thought", streamedThought || "");
-    const lines = (displayResponse || "").split(/\r?\n/);
-    const responsePreview = lines.length ? lines.join("\n") : "_waiting for response..._";
-    const editingText = getEditingStatusText();
-    const streamElapsedSec = Math.max(0, Math.floor((Date.now() - streamStartAt) / 1000));
-    const spinner = spinnerFrames[streamElapsedSec % spinnerFrames.length];
-    const status = editingState.active
-      ? (editingState.phase === "apply" ? "APPLYING CHANGES" : "STREAM EDITING")
-      : (streamedAskUser ? "WAITING FOR USER" : `STREAMING ${spinner}`);
-    const statusColor = editingState.active
-      ? (editingState.phase === "apply" ? "green" : "yellow")
-      : (streamedAskUser ? "yellow" : "cyan");
-    const activityLog = getRealActivities(editingText ? 11 : 12);
-    const activity = editingText ? [...activityLog, editingText] : activityLog;
-    const workspace = renderWorkspaceLayout({
-      title: "Agent CLI Workspace",
-      status,
-      statusColor,
-      meta: `Provider: ${providerName} | Model: ${cfg.getModel(providerName)} | Time: ${streamElapsedSec}s | Chunks: ${streamChunkCount}`,
-      response: normalizeDisplayNewlines(responsePreview),
-      thought: normalizeDisplayNewlines(displayThought),
-      activity,
-      fileTree: LAST_EDITED_FILES.slice(-12),
-      terminalOutput: LAST_TERMINAL_OUTPUT,
-    });
-    logUpdate(workspace);
+  let lastPrintedResponseLen = 0;
+  let lastPrintedThoughtLen = 0;
+  let announcedThought = false;
+  let announcedResponse = false;
+  const printStreamDelta = () => {
+    if (streamUiDisabledForTurn || isPromptInputActive()) return;
+    const split = extractThinkBlocks(streamedResponse || "");
+    const mergedThought = [streamedThought || "", split.thinking || ""].filter(Boolean).join("\n").trim();
+    const displayResponse = stripResponseWrapperText(sanitizeStreamFieldPreview("response", split.response || ""));
+    const displayThought = sanitizeStreamFieldPreview("thought", mergedThought);
+
+    // Print new thought deltas
+    if (displayThought.length > lastPrintedThoughtLen) {
+      if (!announcedThought) {
+        process.stdout.write(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("AI THOUGHT")} ${chalk.dim("—".repeat(20))}\n`);
+        announcedThought = true;
+      }
+      const delta = displayThought.slice(lastPrintedThoughtLen);
+      process.stdout.write(chalk.gray(delta));
+      lastPrintedThoughtLen = displayThought.length;
+    }
+
+    // Print new response deltas
+    if (displayResponse.length > lastPrintedResponseLen) {
+      if (!announcedResponse) {
+        const sep = announcedThought ? "\n" : "";
+        process.stdout.write(`${sep}${chalk.dim("—".repeat(20))} ${chalk.bold.green("AI RESPONSE")} ${chalk.dim("—".repeat(20))}\n`);
+        announcedResponse = true;
+      }
+      const delta = displayResponse.slice(lastPrintedResponseLen);
+      process.stdout.write(delta);
+      lastPrintedResponseLen = displayResponse.length;
+    }
   };
-  const renderThrottle = createRenderThrottler(Number(cfg.get("stream_render_fps", 24)), renderLiveWorkspace);
+  const renderThrottle = createRenderThrottler(Number(cfg.get("stream_render_fps", 24)), printStreamDelta);
   requestWorkspaceRender = () => {
-    if (MISSION_BOARD || streamUiDisabledForTurn || isPromptInputActive()) return;
+    if (streamUiDisabledForTurn || isPromptInputActive()) return;
     renderThrottle.request();
   };
   const streamCallback = (chunk: string) => {
     try {
       streamBuffer.push(chunk);
       streamChunkCount += 1;
+      if (streamChunkCount === 1) {
+        stopThinking();
+      }
       if (!announcedStreaming) {
         printActivity(`Streaming response from ${providerName}.`);
         eventBus.emit({
@@ -1928,6 +2034,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       }
       if (liveThought && liveThought.length > streamedThought.length) {
         streamedThought = liveThought;
+      }
+      const splitStream = extractThinkBlocks(streamedResponse);
+      streamedResponse = splitStream.response;
+      if (splitStream.thinking && splitStream.thinking.length > streamedThought.length) {
+        streamedThought = splitStream.thinking;
       }
 
       if (observed.fileEdits.length) {
@@ -1999,7 +2110,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   let rawModelThinking = "";
   let usage = { input_tokens: 0, output_tokens: 0 };
   const streamRetryCount = Number(cfg.get("stream_retry_count", 1));
-  const streamTimeoutMs = Number(cfg.get("stream_timeout_ms", 90_000));
+  const streamTimeoutMs = Number(cfg.get("stream_timeout_ms", 300_000));
   try {
     printActivity(`Talking to provider: ${providerName}`);
     eventBus.emit({
@@ -2015,6 +2126,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       });
     }
     if (!MISSION_BOARD) {
+      startThinking();
       requestWorkspaceRender?.();
       streamHeartbeat = setInterval(() => {
         if (streamUiDisabledForTurn || MISSION_BOARD || isPromptInputActive()) return;
@@ -2102,8 +2214,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       message: `Provider error: ${String(error)}`,
       success: false,
     });
+    stopThinking(); // Call stopThinking in catch block
     return null;
   } finally {
+    stopThinking(); // Call stopThinking in finally block
     if (streamHeartbeat) {
       clearInterval(streamHeartbeat);
       streamHeartbeat = null;
@@ -2136,6 +2250,20 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   data = normalizeActionPayload(data);
   data = normalizeSchemaAliases(data);
   data = normalizeAskUserFields(data);
+  if (providerName === "ollama") {
+    const rawContext = (data as Record<string, unknown>).context;
+    if (Array.isArray(rawContext) && rawContext.length) {
+      const contextTokens = rawContext
+        .map((x) => Number(x))
+        .filter((x) => Number.isFinite(x) && x >= 0)
+        .map((x) => Math.floor(x));
+      if (contextTokens.length) {
+        setOllamaSessionContext(contextTokens, cfg.getModel("ollama"));
+        setOllamaPromptFingerprint(promptFingerprint);
+      }
+      delete (data as Record<string, unknown>).context;
+    }
+  }
   if (!data.response) {
     const canonical = extractCanonicalResponse(data);
     if (canonical) data.response = canonical;
@@ -2199,6 +2327,28 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
   if (!data.lint_project && Array.isArray(streamSnapshot.seenToolKeys) && streamSnapshot.seenToolKeys.includes("lint_project")) {
     data.lint_project = true;
+  }
+
+  if (
+    !safeArgs.__autoWebSearchUsed &&
+    !safeArgs.plan &&
+    shouldAutoWebSearchForPrompt(text) &&
+    !data.web_search &&
+    !data.web_browse
+  ) {
+    const asNews = /\b(news|headline|today|latest)\b/i.test(text);
+    data.web_search = [text];
+    data.web_search_type = asNews ? "news" : "text";
+    data.web_search_limit = Number(data.web_search_limit || 8);
+    safeArgs.__autoWebSearchUsed = true;
+    printActivity("Auto web search engaged for external/current info.");
+    if (MISSION_BOARD) {
+      MISSION_BOARD.update({
+        status: "AUTO WEB SEARCH",
+        status_style: THEME.accent,
+        log: "Triggered automatic web search for external/current info.",
+      });
+    }
   }
 
   if (!responseText.trim() && !Object.keys(data).length) {
@@ -2359,12 +2509,18 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
 
   const structuredThought = String(data.thought || "");
-  const thoughtMsg = redactPromptLeak(structuredThought || streamedThought.trim());
   let responseMsg = data.response ? String(data.response) : "";
   if (!responseMsg && responseText.trim()) responseMsg = responseText.trim();
   if (!responseMsg && streamedResponse.trim()) responseMsg = streamedResponse.trim();
   if (!responseMsg && streamSnapshot.response.trim()) responseMsg = streamSnapshot.response.trim();
-  responseMsg = stripResponseWrapperText(responseMsg);
+  const thinkSplit = extractThinkBlocks(responseMsg);
+  responseMsg = cleanVisibleAssistantText(thinkSplit.response);
+  const mergedThought = [structuredThought, streamedThought.trim(), rawModelThinking.trim(), thinkSplit.thinking]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  const thoughtMsg = redactPromptLeak(mergedThought);
   if (!responseMsg.trim()) {
     responseMsg = hasToolIntent(data)
       ? buildFallbackResponse(data)
@@ -2457,26 +2613,26 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
   const claimedPaths = extractClaimedFilePaths(responseMsg || responseText || "");
   if (claimedPaths.length && !MISSION_BOARD) {
-    printPanel(claimedPaths.map((p) => `- \`${p}\``).join("\n"), "Files Mentioned By AI", THEME.secondary, true);
+    printInfo(claimedPaths.map((p) => `  → ${p}`).join("\n"));
   }
 
   const showUi = !Boolean(MISSION_BOARD);
   if (Boolean(cfg.get("think_mode", false)) && !isFast) {
     displayThinking(rawModelThinking, thoughtMsg, showUi, Boolean(MISSION_BOARD));
   }
+  // If response was already streamed to stdout, just add a newline separator.
+  // Otherwise (non-streaming or mission mode), print it.
+  const alreadyStreamed = announcedStreaming && !MISSION_BOARD && lastPrintedResponseLen > 0;
   if (responseMsg) {
-    printPanel(responseMsg, "Agent Response", "green", true);
-    if (cfg.isVoiceMode()) void speakText(responseMsg);
+    process.stdout.write("\n");
+    // Always render final response through markdown renderer for clean terminal output.
+    console.print(responseMsg);
+    if (alreadyStreamed) process.stdout.write("\n");
   }
-  if (!MISSION_BOARD) {
-    const finalActivities = getRealActivities(12);
-    if (finalActivities.length) {
-      printPanel(finalActivities.map((a) => `- ${a}`).join("\n"), "Activity", THEME.warning, true);
-    }
-  }
+  if (responseMsg && cfg.isVoiceMode()) void speakText(responseMsg);
   // Minimal runtime UI: response + thought + activity only (no plan/schema panels).
   if (changes.length && !isFast) {
-    printPanel(changes.map((c) => `- \`${c.file}\``).join("\n"), "Suggested Files", THEME.accent, true);
+    printPanel(changes.map((c) => `- \`${c.file}\``).join("\n"), "Suggested Files", THEME.accent, true, false, true);
     console.print("\nProposed Changes:");
     changes.forEach((change) => {
       try {
@@ -2487,7 +2643,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     });
   }
   if (commands.length && !isFast) {
-    printPanel(commands.map((c) => `- \`${c.command}\`${c.reason ? ` - ${c.reason}` : ""}`).join("\n"), "Proposed Commands", "yellow", true);
+    printPanel(commands.map((c) => `- \`${c.command}\`${c.reason ? ` - ${c.reason}` : ""}`).join("\n"), "Proposed Commands", "yellow", true, false, true);
   }
 
   const strictEditRequiresFullAccess = Boolean(cfg.get("strict_edit_requires_full_access", true));
@@ -2601,72 +2757,51 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
     if (toBoolean(inputAction)) {
       if (changes.length) {
-        if (requiresHumanReview) {
-          const accepted: TaskChange[] = [];
-          const skipped: string[] = [];
-          let approveAllRemaining = false;
-          let skipAllRemaining = false;
-          for (let i = 0; i < changes.length; i += 1) {
-            const change = changes[i];
-            const existed = fs.existsSync(path.resolve(process.cwd(), change.file));
-            if (approveAllRemaining) {
-              accepted.push(change);
-              continue;
-            }
-            if (skipAllRemaining) {
-              printInfo(`Skipped: ${change.file}`);
-              skipped.push(change.file);
-              continue;
-            }
+        const accepted: TaskChange[] = [];
+        const skipped: string[] = [];
 
-            while (true) {
-              const decision = await askChangeDecision(change, existed, i + 1, changes.length);
-              if (decision === "preview") {
-                try {
-                  showDiff(change.file, change.original || "", change.edited || "");
-                } catch (error) {
-                  printError(`Error showing diff: ${String(error)}`);
-                }
-                continue;
-              }
-              if (decision === "all") {
-                approveAllRemaining = true;
-                accepted.push(change);
-                break;
-              }
-              if (decision === "none") {
-                skipAllRemaining = true;
-                printInfo(`Skipped: ${change.file}`);
-                skipped.push(change.file);
-                break;
-              }
-              if (decision === "yes") accepted.push(change);
-              else {
-                printInfo(`Skipped: ${change.file}`);
-                skipped.push(change.file);
-              }
-              break;
-            }
+        for (let i = 0; i < changes.length; i += 1) {
+          const change = changes[i];
+          // Always show diff for transparency and preview.
+          try {
+            showDiff(change.file, change.original || "", change.edited || "");
+          } catch (error) {
+            printError(`Error showing diff for ${change.file}: ${String(error)}`);
           }
-          changes = accepted;
-          data.changes = accepted;
-          if (missionData && skipped.length) {
-            const existingSkipped = Array.isArray((missionData as Record<string, unknown>).skipped_files)
-              ? ((missionData as Record<string, unknown>).skipped_files as string[])
-              : [];
-            (missionData as Record<string, unknown>).skipped_files = [...new Set([...existingSkipped, ...skipped])];
+
+          if (fullAccess) {
+            printActivity(`Auto-accepting change for ${change.file} (Full Access)`);
+            accepted.push(change);
+            continue;
           }
-          if (!changes.length) printWarning("No file changes were accepted.");
+
+          const confirmed = await promptConfirmEdit(change.file);
+          if (confirmed) accepted.push(change);
+          else {
+            printInfo(`Skipped: ${change.file}`);
+            skipped.push(change.file);
+          }
         }
-
-        if (changes.length) {
-          if (MISSION_BOARD) {
-            MISSION_BOARD.update({
-              status: "APPLYING CHANGES",
-              status_style: THEME.accent,
-              log: `Applying ${changes.length} file change(s).`,
-            });
-          }
+        changes = accepted;
+        data.changes = accepted;
+        if (missionData && skipped.length) {
+          const existingSkipped = Array.isArray((missionData as Record<string, unknown>).skipped_files)
+            ? ((missionData as Record<string, unknown>).skipped_files as string[])
+            : [];
+          (missionData as Record<string, unknown>).skipped_files = [...new Set([...existingSkipped, ...skipped])];
+        }
+        if (!changes.length) {
+          printWarning("No file changes were accepted.");
+        }
+      }
+      if (changes.length) {
+        if (MISSION_BOARD) {
+          MISSION_BOARD.update({
+            status: "APPLYING CHANGES",
+            status_style: THEME.accent,
+            log: `Applying ${changes.length} file change(s).`,
+          });
+        }
           const preApply = changes.map((change) => {
             const full = path.resolve(process.cwd(), change.file);
             const existed = fs.existsSync(full);
@@ -2675,37 +2810,38 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
           });
 
           try {
-            apply(changes, (filePath, existedBefore, idx, total, phase) => {
-              const action = existedBefore ? "Editing" : "Creating";
-              const absPath = path.resolve(process.cwd(), filePath);
-              if (phase === "start") {
-                updateEditingSpinner(filePath, "apply");
-                printActivity(`${action} file ${idx}/${total}: ${filePath}`);
-                printInfo(`${action} file ${idx}/${total}: ${filePath}`);
-                eventBus.emit({
-                  phase: "writing_file",
-                  status: "start",
-                  message: `${action} file ${idx}/${total}: ${filePath}`,
-                  file_path: absPath,
-                });
-              } else if (phase === "done") {
-                updateEditingSpinner(filePath, "apply");
-                printActivity(`Done editing ${filePath}`);
-                eventBus.emit({
-                  phase: "writing_file",
-                  status: "end",
-                  message: `Finished writing ${filePath}`,
-                  file_path: absPath,
-                  success: true,
-                });
-              }
-              if (MISSION_BOARD) {
-                MISSION_BOARD.update({
-                  status: `APPLYING ${idx}/${total}`,
-                  status_style: THEME.accent,
-                  log: `${action}: ${filePath}`,
-                });
-              }
+            const writeActivity = `Applying ${changes.length} file change(s)...`;
+            await liveStatus(writeActivity, "Applying Changes", async () => {
+              apply(changes, (filePath, existedBefore, idx, total, phase) => {
+                const action = existedBefore ? "Editing" : "Creating";
+                const absPath = path.resolve(process.cwd(), filePath);
+                if (phase === "start") {
+                  updateEditingSpinner(filePath, "apply");
+                  printActivity(`${action} file ${idx}/${total}: ${filePath}`);
+                  if (MISSION_BOARD) {
+                    MISSION_BOARD.update({
+                      status: `APPLYING ${idx}/${total}`,
+                      status_style: THEME.accent,
+                      log: `${action}: ${filePath}`,
+                    });
+                  }
+                  eventBus.emit({
+                    phase: "writing_file",
+                    status: "start",
+                    message: `${action} file ${idx}/${total}: ${filePath}`,
+                    file_path: absPath,
+                  });
+                } else if (phase === "done") {
+                  updateEditingSpinner(filePath, "apply");
+                  eventBus.emit({
+                    phase: "writing_file",
+                    status: "end",
+                    message: `Finished writing ${filePath}`,
+                    file_path: absPath,
+                    success: true,
+                  });
+                }
+              });
             });
           } catch (error) {
             printError(String(error));
@@ -2770,7 +2906,6 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
             });
           }
         }
-      }
 
       if (commands.length) {
         const policy = cfg.getRunPolicy();
@@ -2792,11 +2927,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
               timeoutMs: Number(cfg.get("command_timeout_ms", 30_000)),
               logEnabled: Boolean(cfg.get("command_log_enabled", true)),
               onStdout: (chunk) => {
-                LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`.slice(-10_000);
+                LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`;
                 if (chunk.trim()) console.print(chunk);
               },
               onStderr: (chunk) => {
-                LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`.slice(-10_000);
+                LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`;
                 if (chunk.trim()) console.print(chunk);
               },
             });
@@ -2828,11 +2963,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
                 timeoutMs: Number(cfg.get("command_timeout_ms", 30_000)),
                 logEnabled: Boolean(cfg.get("command_log_enabled", true)),
                 onStdout: (chunk) => {
-                  LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`.slice(-10_000);
+                  LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`;
                   if (chunk.trim()) console.print(chunk);
                 },
                 onStderr: (chunk) => {
-                  LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`.slice(-10_000);
+                  LAST_TERMINAL_OUTPUT = `${LAST_TERMINAL_OUTPUT}${chunk}`;
                   if (chunk.trim()) console.print(chunk);
                 },
               });
@@ -2880,7 +3015,6 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     return handle(text, safeArgs, nextData);
   }
 }
-
 export async function missionLoop(text: string, args: HandleArgs) {
   MISSION_BOARD = new MissionBoard("Agent CLI Mission Board");
   MISSION_BOARD.update({
@@ -3070,8 +3204,11 @@ export async function missionLoop(text: string, args: HandleArgs) {
   }
   MISSION_BOARD = null;
   if (completionData.response) {
-    printPanel(String(completionData.response), "MISSION RESULT", THEME.success);
-    if (completionData.thought) printPanel(String(completionData.thought), "THOUGHT", THEME.secondary);
+    console.print(String(completionData.response));
+    if (completionData.thought) {
+      process.stdout.write("\n");
+      console.print(chalk.gray(String(completionData.thought)));
+    }
   }
   printSuccess(`Mission finished at step ${stepCount}.`);
   return null;

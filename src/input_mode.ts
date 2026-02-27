@@ -1,8 +1,9 @@
 import { exec } from "child_process";
-import { files } from "./file_browser";
+import { getProjectFiles } from "./file_browser";
 import { cfg } from "./config";
 import { getActiveSessionName } from "./memory";
 import { THEME, console as consoleUi, themeBgColor, themeColor } from "./ui/console";
+import { openContextPicker } from "./ui/context_picker";
 import chalk from "chalk";
 import readline from "readline";
 import logUpdate from "log-update";
@@ -13,21 +14,20 @@ let lastInputRenderRows = 0;
 function getToolbar() {
   const sessionName = getActiveSessionName();
   const provider = cfg.getActiveProvider();
-  const planning = cfg.isPlanningMode() ? " | PLAN" : "";
-  const fast = cfg.isFastMode() ? " | FAST" : "";
-  const see = cfg.isSeeMode() ? " | SEE" : "";
-  const policy = ` | RUN:${cfg.getRunPolicy().toUpperCase()}`;
+  const planning = cfg.isPlanningMode() ? ` ${chalk.bold.yellow("PLAN")}` : "";
+  const fast = cfg.isFastMode() ? ` ${chalk.bold.cyan("FAST")}` : "";
+  const see = cfg.isSeeMode() ? ` ${chalk.bold.magenta("SEE")}` : "";
+  const policy = ` ${chalk.bold.blue("RUN:" + cfg.getRunPolicy().toUpperCase())}`;
 
   const providerStyle = chalk.bold(themeColor(THEME.success)(provider));
-  const text = ` Provider: ${providerStyle} | Session: ${sessionName}${planning}${fast}${see}${policy} | F6 IDE | @ to attach file | /help for commands `;
+  const text = ` \u2699 Provider: ${providerStyle} \u2022 Session: ${chalk.cyan(sessionName)}${planning}${fast}${see}${policy} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
 
-  // Create a full-width background
   const cols = process.stdout.columns || 80;
-  // We need to carefully strip ANSI when calculating padding, but chalk handles BG colors well if we pad first
-  const plainTextLength = ` Provider: ${provider} | Session: ${sessionName}${planning}${fast}${see}${policy} | F6 IDE | @ to attach file | /help for commands `.length;
-  const padding = Math.max(0, cols - plainTextLength);
+  // Use a simpler approach for terminal width padding
+  const plainText = ` \u2699 Provider: ${provider} \u2022 Session: ${sessionName}${planning.replace(/\u001b\[.*?m/g, "")}${fast.replace(/\u001b\[.*?m/g, "")}${see.replace(/\u001b\[.*?m/g, "")}${policy.replace(/\u001b\[.*?m/g, "")} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
+  const padding = Math.max(0, cols - plainText.length);
 
-  const bg = themeBgColor(THEME.dim || "gray");
+  const bg = themeBgColor("dim" as any) || chalk.bgGray;
   return bg(chalk.white(text + " ".repeat(padding)));
 }
 
@@ -50,7 +50,7 @@ function wrapLine(line: string, width: number) {
   return out.length ? out : [""];
 }
 
-function render(promptText: string, inputBuffer: string, cursorOffset: number, autocompleteOptions: string[], autocompleteSelectedIndex: number) {
+function render(promptText: string, inputBuffer: string, cursorOffset: number) {
   if (lastInputRenderRows > 1) {
     process.stdout.write(`\x1b[${lastInputRenderRows - 1}A`);
   }
@@ -67,9 +67,9 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number, a
   const cursorPos = Math.max(0, inputBuffer.length - cursorOffset);
   const logicalLines = inputBuffer.split("\n");
   const cursor = cursorLineCol(inputBuffer, cursorPos);
-  const autoRows = Math.min(5, autocompleteOptions.length);
   const rows = Math.max(10, process.stdout.rows || 24);
-  const inputRows = Math.max(1, rows - autoRows - 2);
+  // Reserve bottom rows so prompt input stays above the status toolbar.
+  const inputRows = Math.max(1, rows - 3);
   const firstPrefixLen = promptLen;
   const continuePrefixLen = promptLen;
   const firstWidth = Math.max(1, cols - firstPrefixLen - 1);
@@ -123,24 +123,6 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number, a
     }
   }
 
-  // If autocomplete is active, render it below
-  if (autocompleteOptions.length > 0) {
-    process.stdout.write("\n");
-    for (let i = 0; i < Math.min(5, autocompleteOptions.length); i++) {
-      process.stdout.write("\x1b[2K\x1b[G"); // clear line
-      if (i === autocompleteSelectedIndex) {
-        const mode = String(cfg.get("theme_mode", "dark") || "dark").toLowerCase();
-        const selectedText = mode === "white" ? chalk.yellowBright(`> ${autocompleteOptions[i]}`) : chalk.black(`> ${autocompleteOptions[i]}`);
-        process.stdout.write(themeBgColor(THEME.accent)(selectedText) + "\n");
-      } else {
-        process.stdout.write(`${themeColor(THEME.dim)(`  ${autocompleteOptions[i]}`)}\n`);
-      }
-    }
-    // Move cursor back up
-    const linesToMoveUp = Math.min(5, autocompleteOptions.length);
-    process.stdout.write(`\x1b[${linesToMoveUp}A`);
-  }
-
   // Draw bottom toolbar
   process.stdout.write("\x1b7"); // Save cursor pos (DEC, more compatible)
   process.stdout.write(`\x1b[${rows};1H`); // move to bottom left
@@ -148,7 +130,7 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number, a
   process.stdout.write(getToolbar()); // draw toolbar
   process.stdout.write("\x1b8"); // Restore cursor pos (DEC, more compatible)
 
-  const totalLinesRendered = visibleRows.length + autoRows;
+  const totalLinesRendered = visibleRows.length;
   lastInputRenderRows = Math.max(1, totalLinesRendered);
   const linesUp = Math.max(0, totalLinesRendered - 1 - cursorVisibleRow);
   if (linesUp > 0) process.stdout.write(`\x1b[${linesUp}A`);
@@ -167,15 +149,8 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
   return new Promise((resolve) => {
     let inputBuffer = "";
     let cursorOffset = 0; // offset from end of string (0 = at end)
-    let autocompleteOptions: string[] = [];
-    let autocompleteSelectedIndex = 0;
-    let inAutocomplete = false;
-    let autocompleteStartIdx = -1;
+    let pickerActive = false;
     let suppressNextLf = false;
-    let lastEnterAt = 0;
-    let lastActionWasInsertedEnter = false;
-    const newlineSupport = cfg.isNewlineSupport();
-    const DOUBLE_ENTER_SUBMIT_MS = 900;
 
     // Enable raw mode
     try { logUpdate.clear(); } catch { /* ignore */ }
@@ -200,42 +175,13 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
 
     const onResize = () => {
       try {
-        render(promptStr, inputBuffer, cursorOffset, autocompleteOptions, autocompleteSelectedIndex);
+        render(promptStr, inputBuffer, cursorOffset);
       } catch {
         // ignore redraw failures during terminal resize races
       }
     };
 
     process.stdout.on('resize', onResize);
-
-    const updateAutocomplete = () => {
-      if (!inAutocomplete) {
-        autocompleteOptions = [];
-        return;
-      }
-      const realCursorPos = inputBuffer.length - cursorOffset;
-      const searchStr = inputBuffer.substring(autocompleteStartIdx + 1, realCursorPos).toLowerCase();
-      const rawSearchStr = inputBuffer.substring(autocompleteStartIdx + 1, realCursorPos).trim();
-
-      if (searchStr.includes(" ")) { // Cancel if space is typed
-        inAutocomplete = false;
-        autocompleteOptions = [];
-        return;
-      }
-
-      const allFiles = files();
-      const matched = allFiles.filter(f => f.toLowerCase().includes(searchStr));
-      const options = [...matched];
-      if (rawSearchStr) {
-        const normalizedRaw = rawSearchStr.replace(/\\/g, "/");
-        const hasExact = allFiles.some((f) => f === normalizedRaw || f === `${normalizedRaw}/`);
-        if (!hasExact) options.unshift(`(new file) ${normalizedRaw}`);
-      }
-      autocompleteOptions = options;
-      if (autocompleteSelectedIndex >= autocompleteOptions.length) {
-        autocompleteSelectedIndex = Math.max(0, autocompleteOptions.length - 1);
-      }
-    };
 
     const splitChunk = (chunk: string) => {
       const out: string[] = [];
@@ -286,18 +232,15 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
 
     const onData = (chunk: string) => {
       for (const key of splitChunk(chunk)) {
+      if (pickerActive) continue;
       const realCursorPos = inputBuffer.length - cursorOffset;
 
       // Ctrl+C
       if (key === '\u0003') {
         inputBuffer = "";
         cursorOffset = 0;
-        autocompleteOptions = [];
-        autocompleteSelectedIndex = 0;
-        inAutocomplete = false;
-        autocompleteStartIdx = -1;
         try {
-          render(promptStr, inputBuffer, cursorOffset, autocompleteOptions, autocompleteSelectedIndex);
+          render(promptStr, inputBuffer, cursorOffset);
         } catch {
           // ignore redraw failure and continue input collection
         }
@@ -321,83 +264,33 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
         continue;
       }
 
-      // Ctrl+Enter / F5 submit; plain Enter inserts newline when enabled.
+      // Ctrl+Enter / F5 / Enter submit from the prompt line.
       const isForceSubmitKey =
         key === '\x1b[15~' || // F5
         isCtrlEnter(key);
       const isEnterKey = key === '\r' || key === '\n';
       const shouldSubmit =
         isForceSubmitKey ||
-        (!newlineSupport && isEnterKey);
+        isEnterKey;
 
       if (shouldSubmit || isEnterKey) {
         if (key === "\r") suppressNextLf = true;
-        if (inAutocomplete && autocompleteOptions.length > 0) {
-          // Apply autocomplete
-          const selectedRaw = autocompleteOptions[autocompleteSelectedIndex];
-          const selected = selectedRaw.startsWith("(new file) ") ? selectedRaw.slice("(new file) ".length) : selectedRaw;
-          const before = inputBuffer.substring(0, autocompleteStartIdx);
-          const after = inputBuffer.substring(realCursorPos);
-          inputBuffer = before + "@" + selected + " " + after;
-          cursorOffset = after.length;
-          inAutocomplete = false;
-          autocompleteOptions = [];
-          suppressNextLf = true;
-          lastActionWasInsertedEnter = false;
-        } else if (!shouldSubmit && isEnterKey && newlineSupport) {
-          const now = Date.now();
-          const isQuickDoubleEnter = now - lastEnterAt <= DOUBLE_ENTER_SUBMIT_MS;
-          const atEnd = realCursorPos === inputBuffer.length;
-          const endsWithNewline = atEnd && inputBuffer.endsWith("\n");
-          // If the user is on a blank trailing line and presses Enter again, submit regardless of speed.
-          if (endsWithNewline) {
-            cleanup();
-            resolve(inputBuffer);
-            return;
-          }
-          if (isQuickDoubleEnter && atEnd && lastActionWasInsertedEnter) {
-            cleanup();
-            resolve(inputBuffer);
-            return;
-          }
-          // Insert real newline into payload.
-          inputBuffer = inputBuffer.substring(0, realCursorPos) + "\n" + inputBuffer.substring(realCursorPos);
-          cursorOffset = inputBuffer.length - (realCursorPos + 1);
-          lastEnterAt = now;
-          lastActionWasInsertedEnter = true;
-        } else {
-          // Submit
-          cleanup();
-          resolve(inputBuffer);
-          return;
-        }
+        // Submit
+        cleanup();
+        resolve(inputBuffer);
+        return;
       }
       // Tab
       else if (key === '\t') {
-        if (inAutocomplete && autocompleteOptions.length > 0) {
-          const selectedRaw = autocompleteOptions[autocompleteSelectedIndex];
-          const selected = selectedRaw.startsWith("(new file) ") ? selectedRaw.slice("(new file) ".length) : selectedRaw;
-          const before = inputBuffer.substring(0, autocompleteStartIdx);
-          const after = inputBuffer.substring(realCursorPos);
-          inputBuffer = before + "@" + selected + " " + after;
-          cursorOffset = after.length;
-          inAutocomplete = false;
-          autocompleteOptions = [];
-          lastActionWasInsertedEnter = false;
-        }
+        inputBuffer = inputBuffer.substring(0, realCursorPos) + "\t" + inputBuffer.substring(realCursorPos);
+        cursorOffset = inputBuffer.length - (realCursorPos + 1);
       }
       // Backspace
       else if (key === '\x7f' || key === '\b') {
         if (realCursorPos > 0) {
-          const charDel = inputBuffer[realCursorPos - 1];
           inputBuffer = inputBuffer.substring(0, realCursorPos - 1) + inputBuffer.substring(realCursorPos);
-
-          if (charDel === '@' && inAutocomplete && autocompleteStartIdx === realCursorPos - 1) {
-            inAutocomplete = false;
-          }
-          if (inAutocomplete) updateAutocomplete();
+          cursorOffset = inputBuffer.length - (realCursorPos - 1);
         }
-        lastActionWasInsertedEnter = false;
       }
       // Arrow Keys (ANSI sequences)
       else if (key.startsWith('\x1b[') || key.startsWith("\x1bO")) {
@@ -407,41 +300,47 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
           if (cursorOffset > 0) cursorOffset--;
         } else if (isLeft(key)) { // Left
           if (cursorOffset < inputBuffer.length) cursorOffset++;
-        } else if (isUp(key)) { // Up
-          if (inAutocomplete && autocompleteSelectedIndex > 0) {
-            autocompleteSelectedIndex--;
-          }
-        } else if (isDown(key)) { // Down
-          if (inAutocomplete && autocompleteSelectedIndex < Math.min(5, autocompleteOptions.length) - 1) {
-            autocompleteSelectedIndex++;
-          }
         }
-        lastActionWasInsertedEnter = false;
       }
-      // ESC closes file autocomplete without affecting typed text.
+      // ESC: ignore.
       else if (key === "\x1b") {
-        if (inAutocomplete) {
-          inAutocomplete = false;
-          autocompleteOptions = [];
-        }
-        lastActionWasInsertedEnter = false;
       }
       // Normal characters
       else if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
-        inputBuffer = inputBuffer.substring(0, realCursorPos) + key + inputBuffer.substring(realCursorPos);
-
         if (key === '@') {
-          inAutocomplete = true;
-          autocompleteStartIdx = realCursorPos; // It inserted at realCursorPos, so the '@' is at realCursorPos
-          autocompleteSelectedIndex = 0;
-          updateAutocomplete();
+          pickerActive = true;
+          void (async () => {
+            try {
+              const result = await openContextPicker({ maxPreviewLines: 20 });
+              if (result.action === "confirm" && result.selected.length > 0) {
+                const invalid = result.selected.filter((p) => /\s/.test(p));
+                const safe = result.selected.filter((p) => !/\s/.test(p));
+                if (invalid.length) {
+                  consoleUi.print(themeColor(THEME.warning)(`Skipped ${invalid.length} path(s) with spaces.`));
+                }
+                if (safe.length) {
+                  const tokens = safe.map((p) => `@${p}`).join(" ") + " ";
+                  inputBuffer = inputBuffer.substring(0, realCursorPos) + tokens + inputBuffer.substring(realCursorPos);
+                  cursorOffset = inputBuffer.length - (realCursorPos + tokens.length);
+                }
+              }
+            } finally {
+              pickerActive = false;
+              try {
+                render(promptStr, inputBuffer, cursorOffset);
+              } catch {
+                // ignore redraw failure and continue input collection
+              }
+            }
+          })();
+          continue;
         }
-        if (inAutocomplete) updateAutocomplete();
-        lastActionWasInsertedEnter = false;
+        inputBuffer = inputBuffer.substring(0, realCursorPos) + key + inputBuffer.substring(realCursorPos);
+        cursorOffset = inputBuffer.length - (realCursorPos + 1);
       }
 
       try {
-        render(promptStr, inputBuffer, cursorOffset, autocompleteOptions, autocompleteSelectedIndex);
+        render(promptStr, inputBuffer, cursorOffset);
       } catch {
         // ignore redraw failure and continue input collection
       }
@@ -451,7 +350,7 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
     process.stdin.on('data', onData);
     process.stdin.resume();
     try {
-      render(promptStr, inputBuffer, cursorOffset, autocompleteOptions, autocompleteSelectedIndex);
+      render(promptStr, inputBuffer, cursorOffset);
     } catch {
       // ignore first-render errors and continue in raw input mode
     }
@@ -508,7 +407,7 @@ export async function loop(cb: (text: string) => Promise<unknown> | unknown) {
 
       // Check attachments
       if (stripped.includes("@")) {
-        const allFiles = files();
+        const allFiles = new Set(getProjectFiles().map((x) => x.path));
         const maybe = stripped
           .split(/\s+/)
           .filter((x) => x.startsWith("@"))
@@ -516,7 +415,7 @@ export async function loop(cb: (text: string) => Promise<unknown> | unknown) {
         for (const p of maybe) {
           const likelyNewFile = /[\\/]/.test(p) || /\.[A-Za-z0-9]{1,10}$/.test(p);
           // Basic check if it exists in tracked files
-          if (!likelyNewFile && !allFiles.some((f) => f === p || f.startsWith(`${p}/`))) {
+          if (!likelyNewFile && !allFiles.has(p.replace(/\\/g, "/"))) {
             consoleUi.print(themeColor(THEME.warning)(`Warning: attachment might not exist in project view: ${p}`));
           }
         }

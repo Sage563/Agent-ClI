@@ -5,7 +5,8 @@ function extractJsonStringAt(buffer: string, start: number) {
     for (let j = idx + 1; j < buffer.length; j += 1) {
       const next = buffer[j];
       if (next === " " || next === "\n" || next === "\r" || next === "\t") continue;
-      return next === "," || next === "}" || next === "]";
+      // If the next char is a quote, it's likely a new key starting (missing comma case)
+      return next === "," || next === "}" || next === "]" || next === '"';
     }
     return true;
   };

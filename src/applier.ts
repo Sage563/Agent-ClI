@@ -71,7 +71,16 @@ export function apply(
       let nextContent = "";
       if (existedBefore) {
         let current = previousContent || "";
-        if (change.original) {
+
+        // Line-number-based editing: replace lines [start_line..end_line] with edited content
+        if (change.start_line && change.end_line && (!change.original || change.original.trim() === "")) {
+          const lines = current.split(/\r?\n/);
+          const start = Math.max(1, change.start_line) - 1; // Convert 1-indexed to 0-indexed
+          const end = Math.min(lines.length, change.end_line);
+          const editedLines = change.edited.split(/\r?\n/);
+          lines.splice(start, end - start, ...editedLines);
+          nextContent = lines.join("\n");
+        } else if (change.original) {
           // 1. Exact match attempt (multi-replacement via split/join)
           if (current.includes(change.original)) {
             nextContent = current.split(change.original).join(change.edited);

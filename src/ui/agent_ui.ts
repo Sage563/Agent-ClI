@@ -1,17 +1,17 @@
-import fs from "fs-extra";
+import chalk from "chalk";
 import path from "path";
 import { createPatch } from "diff";
-import { printPanel, THEME } from "./console";
+import { THEME, themeColor, consoleUI } from "./console";
 
 export function showDiff(filePath: string, original: string, edited: string) {
-  const abs = path.resolve(process.cwd(), filePath);
   if (!original && edited) {
     const lines = edited.split(/\r?\n/);
-    if (lines.length > 20) {
-      printPanel(`LARGE FILE CREATED\n\nLines: ${lines.length}\nPreview:\n${(lines[0] || "").slice(0, 100)}...`, `New File: ${filePath}`, THEME.success);
+    console.log(`\n${chalk.bold.green(`\u271a New File: ${filePath}`)} (${lines.length} lines)`);
+    if (lines.length > 30) {
+      console.log(chalk.gray(`  (Preview: ${(lines[0] || "").slice(0, 100)}...)`));
       return;
     }
-    printPanel(edited, `New File: ${filePath}`, THEME.success);
+    console.log(edited);
     return;
   }
 
@@ -21,31 +21,39 @@ export function showDiff(filePath: string, original: string, edited: string) {
     .filter((line) => (line.startsWith("+") || line.startsWith("-")) && !line.startsWith("+++") && !line.startsWith("---"));
   if (!actualChanges.length) return;
 
-  if (actualChanges.length > 15) {
-    printPanel(
-      `[dim]First edit:[/dim]\n${(actualChanges[0] || "").slice(0, 100)}...`,
-      `[bold red]BIGG DIF[/bold red] - ${filePath}`,
-      THEME.warning,
-    );
-    return;
-  }
-
-  printPanel(diff, `Edit: ${filePath}`, THEME.primary);
-  if (!fs.existsSync(abs) && edited) {
-    // noop: matches original behavior of displaying only.
+  console.log(`\n${chalk.bold(themeColor(THEME.primary)(`\u25b6 Edit: ${filePath}`))}`);
+  if (actualChanges.length > 20) {
+    console.log(chalk.gray(`  (Large diff: ${actualChanges.length} changes)`));
+  } else {
+    console.log(diff);
   }
 }
 
-export function displayThinking(
+export async function displayThinking(
   rawModelThinking: string,
   structuredThought: string,
-  showUi: boolean,
-  missionBoardActive: boolean,
+  _showUi: boolean,
+  _missionBoardActive: boolean,
 ) {
-  if (!(showUi && !missionBoardActive)) return;
-  const blocks: string[] = [];
-  if (rawModelThinking) blocks.push(`#### Raw Model Thinking\n\n${rawModelThinking}`);
-  if (structuredThought) blocks.push(`#### Agent Strategy\n\n${structuredThought}`);
-  if (!blocks.length) return;
-  printPanel(blocks.join("\n\n---\n\n"), "Deep Reasoning", THEME.secondary, true);
+  if (rawModelThinking) {
+    console.log(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("AI THOUGHT")} ${chalk.dim("—".repeat(20))}`);
+    console.log(chalk.gray(rawModelThinking));
+  }
+  if (structuredThought) {
+    console.log(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("STRATEGY")} ${chalk.dim("—".repeat(20))}`);
+    console.log(chalk.gray(structuredThought));
+  }
+}
+
+/**
+ * Interactively prompts the user to accept or reject a file edit.
+ */
+export async function promptConfirmEdit(filePath: string): Promise<boolean> {
+  const relPath = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
+  console.log(chalk.gray(`\nFile: ${relPath}`));
+  const prompt = `${chalk.bold.cyan("?")} ${chalk.bold("Accept this edit? (y/n)")} > `;
+  const answer = (await consoleUI.input(prompt)).toLowerCase().trim();
+  if (answer === "y" || answer === "yes") return true;
+  if (answer === "n" || answer === "no") return false;
+  return false;
 }

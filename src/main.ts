@@ -63,7 +63,7 @@ export async function runMain() {
     }
 
     if (args.continueSession) {
-      printPanel(`Continuing session: ${getActiveSessionName()}`, "Session", "blue");
+      printPanel(`Continuing session: ${getActiveSessionName()}`, "Session", "blue", false, false, true);
     }
 
     if (args.oneshot) {
@@ -81,11 +81,13 @@ export async function runMain() {
       `Session: **${sessionName}**\n\n` +
       `Type \`/help\` for commands.\n` +
       `Type \`/config -h\` for all config options.\n` +
-      `Use \`@file\` to attach context.\n` +
+      `Type \`@\` to open the context picker and attach files.\n` +
       `Use \`!command\` to run shell commands inline.\n` +
-      `Enter = newline | Ctrl+Enter = submit | Double Enter = submit fallback | F5 = submit.`,
+      `Enter = submit | F5 = submit | Type @ to attach context files.`,
       "Ready",
       THEME.secondary || "cyan",
+      true,
+      false,
       true
     );
 

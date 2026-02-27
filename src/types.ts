@@ -68,6 +68,8 @@ export type TaskChange = {
   file: string;
   original: string;
   edited: string;
+  start_line?: number;
+  end_line?: number;
 };
 
 export type TaskCommand = {

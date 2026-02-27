@@ -1,11 +1,11 @@
-﻿import { execSync } from "child_process";
+import { execSync } from "child_process";
 import fs from "fs-extra";
 
 import readline from "readline";
 import chalk from "chalk";
 import logUpdate from "log-update";
 import { cfg } from "./config";
-import { reloadTheme, console } from "./ui/console";
+import { reloadTheme, console, printPanel, THEME } from "./ui/console";
 import { APP_ONBOARDING_ART } from "./app_dirs";
 import { BUILTIN_PROVIDERS, getProviderLabel } from "./providers/catalog";
 
@@ -457,19 +457,11 @@ function applyAccessScope(scope: AccessScope) {
   });
   cfg.setRunPolicy("ask");
   cfg.setVisibilityAllowed(false);
+  cfg.setWebBrowsingAllowed(true);
 }
 
 function showStaticScreen(mode: ThemeMode, title: string, description: string[]) {
-  console.print(
-    renderScreen({
-      mode,
-      frame: 0,
-      title,
-      description,
-      options: [],
-      selectedIndex: 0,
-    }),
-  );
+  printPanel(description.join("\n\n"), title, THEME.primary, true, false, true);
 }
 
 async function configureProvider(provider: string, mode: ThemeMode, alwaysAsk = false) {
@@ -478,9 +470,6 @@ async function configureProvider(provider: string, mode: ThemeMode, alwaysAsk = 
 
   if (provider !== "ollama") {
     const existingKey = cfg.getApiKey(provider) || "";
-    // If we're not forcing a prompt and we already have a key, we can skip asking for it unless configuring intentionally.
-    // wait, the old code returned early if existingKey existed and !alwaysAsk. But now we want to ask for endpoints too.
-    // So we just don't return early; we ask for the key, then ask for endpoint/model.
     if (alwaysAsk || !existingKey) {
       const keyHint = existingKey ? ` [saved: ${maskSecret(existingKey)}]` : "";
       const key = (await console.input(`API key for ${providerLabel}${keyHint} (blank to keep/skip): `)).trim();

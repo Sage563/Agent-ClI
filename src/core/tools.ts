@@ -151,11 +151,57 @@ export function formatSearchCitations(
 }
 
 function isBinary(filePath: string) {
+  if (!fs.existsSync(filePath)) return false;
   const fd = fs.openSync(filePath, "r");
   const buf = Buffer.alloc(1024);
   const size = fs.readSync(fd, buf, 0, 1024, 0);
   fs.closeSync(fd);
   return buf.slice(0, size).includes(0);
+}
+
+export function gitStatus() {
+  const rg = spawnSync("git", ["status", "--short"], { encoding: "utf8", cwd: process.cwd() });
+  if (rg.error) return `Git Status Error: ${rg.error.message}`;
+  return rg.stdout || "Git state clean.";
+}
+
+export function gitLog(limit = 10) {
+  const rg = spawnSync("git", ["log", "--oneline", "-n", String(limit)], { encoding: "utf8", cwd: process.cwd() });
+  if (rg.error) return `Git Log Error: ${rg.error.message}`;
+  return rg.stdout || "No git logs found.";
+}
+
+export function gitDiff(staged = false) {
+  const args = ["diff"];
+  if (staged) args.push("--staged");
+  const rg = spawnSync("git", args, { encoding: "utf8", cwd: process.cwd() });
+  if (rg.error) return `Git Diff Error: ${rg.error.message}`;
+  return rg.stdout || "No differences found.";
+}
+
+export function createFile(filePath: string, content: string = "") {
+  const full = path.resolve(process.cwd(), filePath);
+  if (fs.existsSync(full)) return `Error: File already exists at ${filePath}`;
+  fs.ensureDirSync(path.dirname(full));
+  fs.writeFileSync(full, content, "utf8");
+  return `Successfully created ${filePath}`;
+}
+
+export function moveFile(source: string, destination: string) {
+  const src = path.resolve(process.cwd(), source);
+  const dst = path.resolve(process.cwd(), destination);
+  if (!fs.existsSync(src)) return `Error: Source file not found: ${source}`;
+  if (fs.existsSync(dst)) return `Error: Destination already exists: ${destination}`;
+  fs.ensureDirSync(path.dirname(dst));
+  fs.moveSync(src, dst);
+  return `Successfully moved ${source} to ${destination}`;
+}
+
+export function deleteFile(filePath: string) {
+  const full = path.resolve(process.cwd(), filePath);
+  if (!fs.existsSync(full)) return `Error: File not found: ${filePath}`;
+  fs.removeSync(full);
+  return `Successfully deleted ${filePath}`;
 }
 
 export function searchProject(pattern: string) {

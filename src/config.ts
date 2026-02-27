@@ -81,7 +81,7 @@ export class Config {
     if (typeof this.config.mission_mode !== "boolean") this.config.mission_mode = false;
     if (typeof this.config.visibility_allowed !== "boolean") this.config.visibility_allowed = false;
     if (typeof this.config.auto_reload_session !== "boolean") this.config.auto_reload_session = false;
-    if (typeof this.config.web_browsing_allowed !== "boolean") this.config.web_browsing_allowed = false;
+    if (typeof this.config.web_browsing_allowed !== "boolean") this.config.web_browsing_allowed = true;
     if (typeof this.config.see_project_mode !== "boolean") this.config.see_project_mode = false;
     if (!this.config.mcp_servers) this.config.mcp_servers = {};
     if (typeof this.config.mcp_enabled !== "boolean") this.config.mcp_enabled = false;
@@ -91,7 +91,7 @@ export class Config {
     if (typeof this.config.stream !== "boolean") this.config.stream = true;
     if (typeof this.config.stream_print !== "boolean") this.config.stream_print = true;
     if (typeof this.config.env_bridge_enabled !== "boolean") this.config.env_bridge_enabled = true;
-    if (typeof this.config.stream_timeout_ms !== "number") this.config.stream_timeout_ms = 90_000;
+    if (typeof this.config.stream_timeout_ms !== "number") this.config.stream_timeout_ms = 300_000;
     if (typeof this.config.stream_retry_count !== "number") this.config.stream_retry_count = 1;
     if (typeof this.config.stream_render_fps !== "number") this.config.stream_render_fps = 24;
     if (typeof this.config.command_timeout_ms !== "number") this.config.command_timeout_ms = 30_000;
