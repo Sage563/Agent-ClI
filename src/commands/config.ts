@@ -1,14 +1,15 @@
-import { cfg } from "../config";
+import { cfg, KNOWN_MODELS } from "../config";
 import { registry } from "./registry";
 import { printError, printInfo, printPanel, printSuccess, printWarning, reloadTheme } from "../ui/console";
+import { BUILTIN_PROVIDERS } from "../providers/catalog";
 
 const GENERATION_KEYS = new Set(["temperature", "max_tokens", "max_output_tokens", "num_ctx", "top_p", "top_k", "num_predict", "repeat_penalty"]);
 const STREAM_KEYS = new Set(["stream", "stream_print"]);
 const GLOBAL_STREAM_KEYS = new Set(["stream_global", "stream_print_global"]);
-const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "command_timeout_ms"]);
+const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "mission_render_fps", "command_timeout_ms"]);
 const BOOLEAN_RUNTIME_KEYS = new Set(["command_log_enabled", "env_bridge_enabled", "strict_edit_requires_full_access"]);
 const THEME_KEYS = new Set(["primary", "secondary", "accent", "success", "warning", "error", "dim", "bg"]);
-const VALID_PROVIDERS = ["ollama", "openai", "anthropic", "gemini", "deepseek"];
+const VALID_PROVIDERS: string[] = [...BUILTIN_PROVIDERS];
 const CONFIG_HELP_FLAGS = new Set(["-h", "--help", "help"]);
 
 function mask(key?: string) {
@@ -37,7 +38,7 @@ function printConfigHelp() {
   text += "- `env_bridge_enabled` (`true`/`false`)\n";
   text += "- `command_log_enabled` (`true`/`false`)\n";
   text += "- `strict_edit_requires_full_access` (`true`/`false`)\n";
-  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `command_timeout_ms` (set `0` for unlimited)\n";
+  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `mission_render_fps`, `command_timeout_ms` (set `0` for unlimited)\n";
   text += "\n## Generation Keys (number)\n";
   text += `- ${Array.from(GENERATION_KEYS).join(", ")}\n`;
   text += "\n## Stream Keys\n";
@@ -71,7 +72,9 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
       const model = cfg.getModel(p);
       const endpoint = cfg.getEndpoint(p) || "(default)";
       const active = p === provider ? " <- active" : "";
-      text += `- ${p}: model=\`${model}\`, endpoint=\`${endpoint}\`${active}\n`;
+      const known = KNOWN_MODELS[p] || [];
+      const modelsList = known.length ? ` [${known.join(", ")}]` : "";
+      text += `- ${p}: model=\`${model}\`${modelsList}, endpoint=\`${endpoint}\`${active}\n`;
     }
     text += "\n## API Keys\n";
     for (const p of VALID_PROVIDERS) {
@@ -291,7 +294,7 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
 
   printWarning(`Unknown config key: ${key}`);
   printInfo(
-    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
+    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, mission_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
   );
   printInfo("Run `/config -h` to see full config help.");
   return true;
@@ -302,12 +305,26 @@ registry.register("/provider", "Switch active provider")((_, args) => {
     printInfo(`Current provider: ${cfg.getActiveProvider()}`);
     return true;
   }
-  const next = args[1].toLowerCase();
+  const input = args[1].toLowerCase();
+
+  // Use a simple alias map for common shorthand
+  const aliases: Record<string, string> = {
+    huggingface: "hf",
+    hugging_face: "hf",
+    hg: "hf",
+    ds: "deepseek",
+    claude: "anthropic",
+    google: "gemini",
+    local: "ollama"
+  };
+
+  const next = aliases[input] || input;
+
   if (VALID_PROVIDERS.includes(next)) {
     cfg.setActiveProvider(next);
     printSuccess(`Switched to provider: ${next}`);
   } else {
-    printError(`Unknown provider: ${next}`);
+    printError(`Unknown provider: ${input}. Available: ${VALID_PROVIDERS.join(", ")}`);
   }
   return true;
 });
@@ -353,14 +370,6 @@ registry.register("/mission", "Toggle mission mode (autonomous loop)")(() => {
   printInfo(`Mission mode: ${cfg.isMissionMode() ? "ON" : "OFF"}`);
   return true;
 });
-
-const KNOWN_MODELS: Record<string, string[]> = {
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o1-mini", "o3-mini"],
-  anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
-  gemini: ["gemini-2.5-pro-preview-06-05", "gemini-2.5-flash-preview-05-20", "gemini-2.0-flash"],
-  deepseek: ["deepseek-chat", "deepseek-reasoner"],
-  ollama: [],
-};
 
 registry.register("/model", "Switch or view AI model (e.g. /model gpt-4o-mini)")((_, args) => {
   const provider = cfg.getActiveProvider();

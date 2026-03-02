@@ -6,7 +6,7 @@ import readline from "readline";
 import { APP_ONBOARDING_ART } from "../app_dirs";
 import { cfg } from "../config";
 import { clear, deleteSession, getActiveSessionName, listSessions, readSession, setActiveSessionName } from "../memory";
-import { console, printSuccess, printWarning } from "./console";
+import { console, printSuccess, printWarning, resetScrollRegion } from "./console";
 
 type SessionSummary = {
   name: string;
@@ -233,7 +233,7 @@ function renderScreen(params: {
   const selectedBg = resolved === "dark" ? chalk.bgCyan.black : chalk.bgBlue.white;
 
   const art = treeArt(mode, frame);
-  const cols = Math.max(60, process.stdout.columns || 120);
+  const cols = Math.max(60, Math.min(100, process.stdout.columns || 120));
   const rows = Math.max(18, process.stdout.rows || 32);
   const contentRows = Math.max(10, rows - 2);
   const inner = Math.max(40, cols - 4);
@@ -336,6 +336,7 @@ async function selectWithArrows(params: {
       : null;
 
     const cleanup = () => {
+      resetScrollRegion();
       if (timer) clearInterval(timer);
       stdin.setRawMode?.(false);
       stdin.removeListener("keypress", onKeypress);

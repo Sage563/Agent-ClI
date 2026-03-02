@@ -32,16 +32,14 @@ export function showDiff(filePath: string, original: string, edited: string) {
 export async function displayThinking(
   rawModelThinking: string,
   structuredThought: string,
-  _showUi: boolean,
-  _missionBoardActive: boolean,
+  showUi: boolean,
+  missionBoardActive: boolean,
 ) {
-  if (rawModelThinking) {
+  if (!showUi || missionBoardActive) return;
+  const finalThought = rawModelThinking.trim() || structuredThought.trim();
+  if (finalThought) {
     console.log(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("AI THOUGHT")} ${chalk.dim("—".repeat(20))}`);
-    console.log(chalk.gray(rawModelThinking));
-  }
-  if (structuredThought) {
-    console.log(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("STRATEGY")} ${chalk.dim("—".repeat(20))}`);
-    console.log(chalk.gray(structuredThought));
+    console.log(chalk.gray(finalThought));
   }
 }
 

@@ -2,7 +2,7 @@ import { handle, SESSION_STATS } from "./core/agent";
 import { loop } from "./input_mode";
 import { cfg } from "./config";
 import { getActiveSessionName } from "./memory";
-import { printPanel, printSessionStats, THEME } from "./ui/console";
+import { printPanel, printSessionStats, setupScrollRegion, THEME } from "./ui/console";
 import { applyConfiguredThemeMode, runFirstLaunchOnboarding } from "./onboarding";
 import { ensureRuntimeAssets } from "./runtime_assets";
 import { eventBus } from "./core/events";
@@ -91,6 +91,7 @@ export async function runMain() {
       true
     );
 
+    setupScrollRegion();
     if (args.query) await handle(args.query, args);
     await loop(async (text) => handle(text, args));
   } catch (error) {

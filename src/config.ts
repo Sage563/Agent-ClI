@@ -6,6 +6,50 @@ import { APP_CONFIG_FILE, APP_SECRETS_FILE } from "./app_dirs";
 import { encryptSecret, decryptSecret } from "./crypto_store";
 import { BUILTIN_PROVIDERS } from "./providers/catalog";
 
+export const KNOWN_MODELS: Record<string, string[]> = {
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o1-mini", "o3-mini"],
+  anthropic: ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
+  gemini: ["gemini-2.5-pro-preview-06-05", "gemini-2.5-flash-preview-05-20", "gemini-2.0-flash"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  ollama: [],
+  hf: [
+    "microsoft/Phi-3-mini-4k-instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "HuggingFaceH4/zephyr-7b-beta",
+    "meta-llama/Meta-Llama-3-8B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+    "Qwen/Qwen3.5-35B-A3B",
+    "google/gemma-2-9b-it",
+    "meta-llama/Llama-2-7b-chat-hf",
+  ],
+};
+
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  "gpt-4o": 128000,
+  "gpt-4o-mini": 128000,
+  "gpt-4-turbo": 128000,
+  o1: 200000,
+  "o1-mini": 128000,
+  "o3-mini": 200000,
+  "claude-sonnet-4-20250514": 200000,
+  "claude-3-5-sonnet-20241022": 200000,
+  "claude-3-5-haiku-20241022": 200000,
+  "claude-3-opus-20240229": 200000,
+  "gemini-2.5-pro-preview-06-05": 1048576,
+  "gemini-2.5-flash-preview-05-20": 1048576,
+  "gemini-2.0-flash": 1048576,
+  "deepseek-chat": 64000,
+  "deepseek-reasoner": 64000,
+  "meta-llama/Llama-2-7b-chat-hf": 4096,
+  "mistralai/Mistral-7B-v0.1": 8192,
+  "mistralai/Mistral-7B-Instruct-v0.3": 32768,
+  "HuggingFaceH4/zephyr-7b-beta": 32768,
+  "meta-llama/Meta-Llama-3-8B-Instruct": 8192,
+  "Qwen/Qwen2.5-72B-Instruct": 32768,
+  "google/gemma-2-9b-it": 8192,
+  "microsoft/Phi-3-mini-4k-instruct": 4096,
+};
+
 function parseDotEnv(text: string) {
   const out: Record<string, string> = {};
   for (const lineRaw of String(text || "").split(/\r?\n/)) {
@@ -93,7 +137,8 @@ export class Config {
     if (typeof this.config.env_bridge_enabled !== "boolean") this.config.env_bridge_enabled = true;
     if (typeof this.config.stream_timeout_ms !== "number") this.config.stream_timeout_ms = 300_000;
     if (typeof this.config.stream_retry_count !== "number") this.config.stream_retry_count = 1;
-    if (typeof this.config.stream_render_fps !== "number") this.config.stream_render_fps = 24;
+    if (typeof this.config.stream_render_fps !== "number") this.config.stream_render_fps = 30;
+    if (typeof this.config.mission_render_fps !== "number") this.config.mission_render_fps = 30;
     if (typeof this.config.command_timeout_ms !== "number") this.config.command_timeout_ms = 30_000;
     if (typeof this.config.command_log_enabled !== "boolean") this.config.command_log_enabled = true;
     if (typeof this.config.strict_edit_requires_full_access !== "boolean") this.config.strict_edit_requires_full_access = false;
@@ -168,6 +213,8 @@ export class Config {
     if (streamRetries !== undefined) setConfigValue("stream_retry_count", streamRetries);
     const streamFps = readNum("AGENT_STREAM_RENDER_FPS");
     if (streamFps !== undefined) setConfigValue("stream_render_fps", streamFps);
+    const missionFps = readNum("AGENT_MISSION_RENDER_FPS");
+    if (missionFps !== undefined) setConfigValue("mission_render_fps", missionFps);
     const commandTimeout = readNum("AGENT_COMMAND_TIMEOUT_MS");
     if (commandTimeout !== undefined) setConfigValue("command_timeout_ms", commandTimeout);
     const commandLog = readBool("AGENT_COMMAND_LOG_ENABLED");
@@ -181,6 +228,7 @@ export class Config {
       anthropic: { model: "ANTHROPIC_MODEL", endpoint: "ANTHROPIC_ENDPOINT", key: "ANTHROPIC_API_KEY" },
       gemini: { model: "GEMINI_MODEL", endpoint: "GEMINI_ENDPOINT", key: "GEMINI_API_KEY" },
       deepseek: { model: "DEEPSEEK_MODEL", endpoint: "DEEPSEEK_ENDPOINT", key: "DEEPSEEK_API_KEY" },
+      hf: { model: "HUGGINGFACE_MODEL", endpoint: "HUGGINGFACE_ENDPOINT", key: "HUGGINGFACE_API_KEY" },
     };
 
     for (const provider of Object.keys(byProvider)) {

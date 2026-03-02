@@ -51,7 +51,7 @@ function decodeJsonStringFragment(raw: string, complete: boolean) {
   }
 }
 
-const STREAM_STRING_FIELDS = ["response", "thought", "plan", "self_critique", "ask_user"] as const;
+const STREAM_STRING_FIELDS = ["response", "thought", "thinking", "plan", "self_critique", "ask_user"] as const;
 type StreamStringField = (typeof STREAM_STRING_FIELDS)[number];
 
 export class StreamingJsonObserver {
@@ -59,6 +59,7 @@ export class StreamingJsonObserver {
   private fieldStarts: Record<StreamStringField, number | null> = {
     response: null,
     thought: null,
+    thinking: null,
     plan: null,
     self_critique: null,
     ask_user: null,
@@ -66,6 +67,7 @@ export class StreamingJsonObserver {
   private emitted: Record<StreamStringField, string> = {
     response: "",
     thought: "",
+    thinking: "",
     plan: "",
     self_critique: "",
     ask_user: "",
@@ -73,6 +75,7 @@ export class StreamingJsonObserver {
   private completed: Record<StreamStringField, boolean> = {
     response: false,
     thought: false,
+    thinking: false,
     plan: false,
     self_critique: false,
     ask_user: false,
@@ -83,7 +86,7 @@ export class StreamingJsonObserver {
 
   constructor(
     private readonly streamToolKeys: string[],
-  ) {}
+  ) { }
 
   private findFieldStart(field: StreamStringField) {
     if (this.fieldStarts[field] !== null || this.completed[field]) return;
@@ -199,6 +202,7 @@ export class StreamingJsonObserver {
     return {
       response: this.emitted.response,
       thought: this.emitted.thought,
+      thinking: this.emitted.thinking,
       plan: this.emitted.plan,
       self_critique: this.emitted.self_critique,
       ask_user: this.emitted.ask_user,
@@ -213,6 +217,7 @@ export class StreamingJsonObserver {
     const deltas: Record<StreamStringField, string> = {
       response: this.updateField("response"),
       thought: this.updateField("thought"),
+      thinking: this.updateField("thinking"),
       plan: this.updateField("plan"),
       self_critique: this.updateField("self_critique"),
       ask_user: this.updateField("ask_user"),

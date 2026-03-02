@@ -1,6 +1,6 @@
 import fs from "fs-extra";
 import path from "path";
-import type { SessionEntry, SessionFile } from "./types";
+import type { SessionEntry, SessionFile, MessageContent } from "./types";
 import { APP_SESSIONS_DIR, APP_ACTIVE_SESSION } from "./app_dirs";
 
 const DEFAULT_SESSION = "default";
@@ -89,8 +89,25 @@ export function add(entry: Record<string, unknown>, name?: string) {
   save(data, name);
 }
 
-export function estimateTokens(text: string): number {
-  return Math.floor((text || "").length / 4);
+export function estimateTokens(content: MessageContent): number {
+  if (typeof content === "string") {
+    return Math.floor((content || "").length / 4);
+  }
+  if (Array.isArray(content)) {
+    let total = 0;
+    for (const part of content) {
+      if (typeof part === "string") {
+        total += Math.floor(part.length / 4);
+      } else if (typeof part === "object" && part !== null) {
+        if (part.type === "text" && typeof part.text === "string") {
+          total += Math.floor(part.text.length / 4);
+        }
+      }
+      // Image data is ignored for character-based token estimation.
+    }
+    return total;
+  }
+  return 0;
 }
 
 export function inject(limit?: number, tokenLimit = 16000): Array<{ role: string; content: string }> {

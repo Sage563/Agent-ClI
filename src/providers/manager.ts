@@ -10,6 +10,9 @@ const PROVIDER_ALIASES: Record<string, string> = {
   google: "gemini",
   claude: "anthropic",
   ds: "deepseek",
+  hf: "hf",
+  huggingface: "hf",
+  hugging_face: "hf",
 };
 
 function normalizeProviderName(name?: string) {
@@ -38,6 +41,10 @@ export async function getProvider(name?: string) {
   if (providerName === "deepseek") {
     const { DeepSeekProvider } = await import("./deepseek");
     return new DeepSeekProvider();
+  }
+  if (providerName === "hf") {
+    const { HuggingFaceProvider } = await import("./huggingface");
+    return new HuggingFaceProvider();
   }
   throw new Error(`Unknown provider: ${providerName}. Available: ${BUILTIN_PROVIDERS.join(", ")}`);
 }

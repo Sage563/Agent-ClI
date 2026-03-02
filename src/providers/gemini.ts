@@ -46,7 +46,7 @@ export class GeminiProvider extends Provider {
 
     const contents: any[] = [];
     history.forEach((msg) => {
-      contents.push({ role: msg.role, parts: [{ text: msg.content }] });
+      contents.push({ role: msg.role, parts: [{ text: this.flattenContent(msg.content) }] });
     });
     const taskJson = JSON.stringify(taskClone);
     const parts: any[] = [{ text: `=== CURRENT TURN OBJECTIVE ===\n${taskJson}\n==============================` }];

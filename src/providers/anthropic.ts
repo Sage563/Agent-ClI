@@ -4,43 +4,44 @@ import type { TaskPayload } from "../types";
 import type { ProviderCallOptions, ProviderResult } from "./base";
 import { Provider } from "./base";
 
-function buildMessages(task: TaskPayload) {
-  const cloned = { ...task } as Record<string, any>;
-  const history = Array.isArray(cloned.session_history) ? cloned.session_history : [];
-  const imageFiles = Array.isArray(cloned.image_files) ? cloned.image_files : [];
-  delete cloned.session_history;
-  delete cloned.image_files;
-
-  const messages: any[] = [];
-  history.forEach((msg) => messages.push({ role: msg.role, content: msg.content }));
-  const taskJson = JSON.stringify(cloned);
-  const parts: any[] = [{ type: "text", text: `=== CURRENT TURN OBJECTIVE ===\n${taskJson}\n==============================` }];
-  for (const img of imageFiles) {
-    const mime = String(img?.mime || "image/png");
-    const data = String(img?.data_base64 || "");
-    if (data) {
-      parts.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: mime,
-          data,
-        },
-      });
-    }
-  }
-  messages.push({ role: "user", content: parts });
-  return messages;
-}
 
 export class AnthropicProvider extends Provider {
+  private buildMessages(task: TaskPayload) {
+    const cloned = { ...task } as Record<string, any>;
+    const history = Array.isArray(cloned.session_history) ? cloned.session_history : [];
+    const imageFiles = Array.isArray(cloned.image_files) ? cloned.image_files : [];
+    delete cloned.session_history;
+    delete cloned.image_files;
+
+    const messages: any[] = [];
+    history.forEach((msg) => messages.push({ role: msg.role, content: this.flattenContent(msg.content) }));
+    const taskJson = JSON.stringify(cloned);
+    const parts: any[] = [{ type: "text", text: `=== CURRENT TURN OBJECTIVE ===\n${taskJson}\n==============================` }];
+    for (const img of imageFiles) {
+      const mime = String(img?.mime || "image/png");
+      const data = String(img?.data_base64 || "");
+      if (data) {
+        parts.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: mime,
+            data,
+          },
+        });
+      }
+    }
+    messages.push({ role: "user", content: parts });
+    return messages;
+  }
+
   async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const apiKey = cfg.getApiKey("anthropic");
     if (!apiKey) throw new Error("Anthropic API key not found. Use '/config anthropic_api_key <key>'.");
 
     const providerConfig = cfg.getProviderConfig("anthropic");
     const client = new Anthropic({ apiKey, timeout: 360000 });
-    const messages = buildMessages(task);
+    const messages = this.buildMessages(task);
     const streamEnabled =
       typeof task._stream_enabled === "boolean" ? task._stream_enabled : Boolean(providerConfig.stream ?? cfg.get("stream", true));
 

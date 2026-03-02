@@ -6,18 +6,45 @@ import readline from "readline";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import { cfg } from "../config";
+import { getActiveSessionName } from "../memory";
 
-marked.use(
-  markedTerminal({
-    codespan: (text: string) => chalk.bgGray.black(text),
-    code: (text: string) => colorByName(THEME.accent || "cyan")(text),
-    firstHeading: (text: string) => chalk.bold(colorByName(THEME.primary || "cyan")(text)),
-    heading: (text: string) => chalk.bold(colorByName(THEME.secondary || "magenta")(text)),
-    strong: (text: string) => chalk.bold(colorByName(THEME.warning || "yellow")(text)),
-    em: (text: string) => chalk.italic(colorByName(THEME.dim || "gray")(text)),
-    href: (text: string) => chalk.underline(colorByName(THEME.accent || "cyan")(text)),
-  })
-);
+const termOpts = markedTerminal({
+  emoji: false,
+  tab: 2,
+  reflowText: true,
+  get width() {
+    return Math.max(40, (process.stdout.columns || 80) - 4);
+  },
+  codespan: (text: string) => chalk.bgGray.black(text),
+  code: (text: string) => colorByName(THEME.accent || "cyan")(text),
+  firstHeading: (text: string) => chalk.bold(colorByName(THEME.primary || "cyan")(text)),
+  heading: (text: string) => chalk.bold(colorByName(THEME.secondary || "magenta")(text)),
+  strong: (text: string) => chalk.bold(colorByName(THEME.warning || "yellow")(text)),
+  em: (text: string) => chalk.italic(colorByName(THEME.dim || "gray")(text)),
+  href: (text: string) => chalk.underline(colorByName(THEME.accent || "cyan")(text)),
+});
+
+marked.use(termOpts);
+marked.use({
+  renderer: {
+    code(token: any) {
+      if (typeof token !== "object" || !token.text) return "";
+      const language = token.lang || "";
+      const content = token.text || "";
+      const formatted = colorByName(THEME.accent || "cyan")(content);
+      return (
+        "\n" +
+        boxen(formatted, {
+          title: language ? chalk.bold(language) : "",
+          borderStyle: "round",
+          padding: { left: 1, right: 1 },
+          borderColor: normalizeColorName(THEME.accent || "cyan"),
+        }) +
+        "\n"
+      );
+    },
+  },
+});
 
 export let THEME = cfg.getTheme();
 let PROMPT_INPUT_ACTIVE = false;
@@ -69,12 +96,12 @@ function renderMarkdown(content: string) {
   }
 }
 
-function terminalWidth() {
-  return Math.max(40, (process.stdout.columns || 100) - 2);
-}
-
-function terminalHeight() {
-  return Math.max(10, (process.stdout.rows || 30) - 2);
+function normalizeResponseText(content: string) {
+  return String(content || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function styleMarkdownLine(content: string, colorName?: string) {
@@ -113,7 +140,6 @@ export function renderPanel(content: string, title = "", style?: string, _fullWi
       borderColor: normalizeColorName(style || THEME.primary),
       padding: { top: 0, bottom: 0, left: 1, right: 1 },
       margin: { top: 1, bottom: 1, left: 0, right: 0 },
-      width: Math.min(width + 2, 100),
     });
   }
 
@@ -147,12 +173,18 @@ export function printWarning(msg: string) {
   console.log(styleMarkdownLine(msg, THEME.warning));
 }
 
-export function printActivity(msg: string) {
-  console.log(chalk.bold.italic(styleMarkdownLine(`Activity: ${msg}`, THEME.dim)));
+export function printActivity(text: string) {
+  if (PROMPT_INPUT_ACTIVE) return;
+  if (MISSION_ACTIVITY_SINK) {
+    MISSION_ACTIVITY_SINK(text);
+    return;
+  }
+  // Use unique ID to allow updating the same activity line
+  logUpdate(`\x1b[36mActivity:\x1b[0m ${text}`);
 }
 
 export function printRule(label = "", style?: string) {
-  const width = Math.max(20, (process.stdout.columns || 80) - 2);
+  const width = Math.max(20, (process.stdout.columns || 80) - 1);
   const color = colorByName(style || THEME.dim || "gray");
   const line = "\u2500".repeat(Math.max(0, width - (label ? label.length + 2 : 0)));
   const text = label ? `${label} ${line}` : line;
@@ -162,10 +194,11 @@ export function printRule(label = "", style?: string) {
 export const consoleApi = {
   log: (...args: unknown[]) => globalThis.console.log(...args),
   error: (...args: unknown[]) => globalThis.console.error(...args),
-  print: (msg: string) => globalThis.console.log(renderMarkdown(msg)),
+  print: (msg: string) => globalThis.console.log(renderMarkdown(normalizeResponseText(msg))),
   input: async (promptText: string) => {
     // Avoid readline prompt corruption when any live logUpdate animation is active.
     try {
+      resetScrollRegion();
       PROMPT_INPUT_ACTIVE = true;
       logUpdate.clear();
       process.stdout.write("\x1b[?25h");
@@ -176,12 +209,6 @@ export const consoleApi = {
     return new Promise<string>((resolve) => {
       rl.question(promptText, (answer) => {
         rl.close();
-        try {
-          // Clean prompt line tail after answer so later UI renders start from a clean state.
-          process.stdout.write("\x1b[2K\x1b[G");
-        } catch {
-          // ignore
-        }
         PROMPT_INPUT_ACTIVE = false;
         resolve(answer);
       });
@@ -192,6 +219,10 @@ export const consoleApi = {
 
 export function isPromptInputActive() {
   return PROMPT_INPUT_ACTIVE;
+}
+
+export function setPromptInputActive(active: boolean) {
+  PROMPT_INPUT_ACTIVE = active;
 }
 
 export const consoleShim = consoleApi;
@@ -206,6 +237,11 @@ export function clearScreen() {
 }
 
 let thinkingTimer: NodeJS.Timeout | null = null;
+let MISSION_ACTIVITY_SINK: ((text: string) => void) | null = null;
+
+export function setMissionActivitySink(sink: ((text: string) => void) | null) {
+  MISSION_ACTIVITY_SINK = sink;
+}
 
 export function startThinking() {
   if (thinkingTimer || PROMPT_INPUT_ACTIVE) return;
@@ -259,9 +295,24 @@ export class MissionBoard {
   statusStyle = THEME.primary;
   logs: string[] = [];
   streaming = false;
+  private spinnerFrames = ["|", "/", "-", "\\"];
+  private spinnerFrameIdx = 0;
+  private liveDirty = false;
+  private liveActive = false;
+  private renderTimer: NodeJS.Timeout | null = null;
+  private readonly renderIntervalMs: number;
 
   constructor(title = "Mission Board") {
     this.title = title;
+    const fpsRaw = Number(cfg.get("mission_render_fps", cfg.get("stream_render_fps", 30)));
+    const fps = Number.isFinite(fpsRaw) ? Math.max(1, Math.floor(fpsRaw)) : 30;
+    this.renderIntervalMs = Math.max(16, Math.floor(1000 / fps));
+    if (process.stdout.isTTY) {
+      this.renderTimer = setInterval(() => {
+        this.spinnerFrameIdx = (this.spinnerFrameIdx + 1) % this.spinnerFrames.length;
+        this.renderLive(true);
+      }, this.renderIntervalMs);
+    }
   }
 
   update(args: {
@@ -273,31 +324,96 @@ export class MissionBoard {
     live_field?: string;
     live_text?: string;
   }) {
-    if (args.tasks) {
+    const normalizeStatus = (value: string | undefined) => String(value || "").trim().toUpperCase();
+    const isTransientStatus = (value: string | undefined) => {
+      const normalized = normalizeStatus(value);
+      return normalized === "STREAMING" || normalized === "STREAM EDITING" || normalized === "THINKING..." || normalized.startsWith("APPLYING ");
+    };
+
+    const nextStatus = typeof args.status === "string" ? args.status : this.status;
+    const nextStatusStyle = String(args.status_style || this.statusStyle || THEME.primary);
+    const hasNewStatus = Boolean(args.status) && nextStatus !== this.status && !isTransientStatus(nextStatus);
+    const hasNewLog = Boolean(args.log) && args.log !== this.logs[this.logs.length - 1];
+
+    // Check if a task was just finished
+    let taskFinishedText = "";
+    if (args.tasks && this.tasks.length > 0) {
       const oldDone = this.tasks.filter(t => t.done).length;
       const newDone = args.tasks.filter(t => t.done).length;
-      if (newDone > oldDone || args.tasks.length !== this.tasks.length) {
-        const total = args.tasks.length;
-        const progress = this.renderProgressBar(newDone, total, 20);
-        console.log(chalk.bold(`\nTask Progress: ${progress} (${newDone}/${total})`));
+      if (newDone > oldDone) {
+        // Find the newly finished task
+        const finishedTask = args.tasks.find((t, i) => t.done && !this.tasks[i]?.done);
+        if (finishedTask) taskFinishedText = finishedTask.text;
       }
-      this.tasks = args.tasks;
     }
-    if (typeof args.thought === "string" && args.thought !== this.thought) {
-      this.thought = args.thought;
-    }
-    if (typeof args.status === "string" && args.status !== this.status) {
-      this.status = args.status;
-      console.log(chalk.bold(themeColor(args.status_style || THEME.primary)(`[MISSION STATUS] ${this.status}`)));
-    }
+
+    // Update internal state before deciding what to render.
+    this.status = nextStatus;
+    if (args.tasks) this.tasks = args.tasks;
+    if (typeof args.thought === "string") this.thought = args.thought;
     if (typeof args.status_style === "string") this.statusStyle = args.status_style;
     if (typeof args.live_field === "string") this.liveField = args.live_field;
     if (typeof args.live_text === "string") this.liveText = args.live_text;
-    if (args.log) {
-      this.logs.push(args.log);
-      console.log(themeColor(THEME.dim)(` \u2022 ${args.log}`));
-      if (this.logs.length > 50) this.logs.shift();
+    this.liveDirty = true;
+
+    const permanentLines: string[] = [];
+    if (taskFinishedText) {
+      permanentLines.push(chalk.green(`(v) Task Completed: ${taskFinishedText}`));
     }
+    if (hasNewStatus) {
+      permanentLines.push(chalk.bold(themeColor(nextStatusStyle)(`[MISSION STATUS] ${this.status}`)));
+    }
+    if (hasNewLog && args.log) {
+      this.logs.push(args.log);
+      permanentLines.push(themeColor(THEME.dim)(` \u2022 ${args.log}`));
+      if (this.logs.length > 100) this.logs.shift();
+    }
+
+    if (permanentLines.length > 0) {
+      this.clearLiveArea();
+      for (const line of permanentLines) {
+        console.log(line);
+      }
+    }
+    this.renderLive();
+  }
+
+  private clearLiveArea() {
+    if (!this.liveActive) return;
+    logUpdate.clear();
+    this.liveActive = false;
+  }
+
+  private renderLive(tick = false) {
+    if (PROMPT_INPUT_ACTIVE) return;
+    if (tick && !this.liveDirty && !this.liveText) return;
+
+    const liveLines: string[] = [];
+    if (this.tasks.length > 0) {
+      const done = this.tasks.filter((t) => t.done).length;
+      const progress = this.renderProgressBar(done, this.tasks.length, 20);
+      liveLines.push(chalk.bold(`Task Progress: ${progress}`));
+    }
+    if (this.liveText) {
+      const frame = this.spinnerFrames[this.spinnerFrameIdx % this.spinnerFrames.length];
+      liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText} ${frame}`));
+    }
+
+    if (liveLines.length === 0) {
+      this.clearLiveArea();
+      this.liveDirty = false;
+      return;
+    }
+    logUpdate(liveLines.join("\n"));
+    this.liveActive = true;
+    this.liveDirty = false;
+  }
+
+  private shouldLogProgress(newTasks: Array<{ text: string; done?: boolean }>) {
+    if (!newTasks || newTasks.length === 0) return false;
+    const oldDone = this.tasks.filter(t => t.done).length;
+    const totalDone = newTasks.filter(t => t.done).length;
+    return totalDone > oldDone || newTasks.length !== this.tasks.length;
   }
 
   setStreaming(_active: boolean) {
@@ -307,6 +423,7 @@ export class MissionBoard {
   markTaskDone(taskIndex: number) {
     if (this.tasks[taskIndex]) {
       this.tasks[taskIndex].done = true;
+      this.liveDirty = true;
       const total = this.tasks.length;
       const done = this.tasks.filter(t => t.done).length;
       const progress = this.renderProgressBar(done, total, 20);
@@ -315,11 +432,12 @@ export class MissionBoard {
     }
   }
 
-  private renderProgressBar(done: number, total: number, width = 24) {
-    if (total <= 0) return `${"\u2591".repeat(width)} 0%`;
+  private renderProgressBar(done: number, total: number, width = 20) {
+    if (total <= 0) return chalk.dim("Wait for tasks...");
     const ratio = Math.max(0, Math.min(1, done / total));
     const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
-    return `${"\u2588".repeat(filled)}${"\u2591".repeat(Math.max(0, width - filled))} ${Math.round(ratio * 100)}%`;
+    const bar = themeColor(THEME.success)("\u2501".repeat(filled)) + chalk.dim("\u2501".repeat(Math.max(0, width - filled)));
+    return `${bar} ${Math.round(ratio * 100)}% (${done}/${total})`;
   }
 
   flush() {
@@ -334,7 +452,11 @@ export class MissionBoard {
   }
 
   close() {
-    logUpdate.clear();
+    if (this.renderTimer) {
+      clearInterval(this.renderTimer);
+      this.renderTimer = null;
+    }
+    this.clearLiveArea();
   }
 }
 
@@ -377,4 +499,46 @@ export function printSessionStats(stats: Record<string, unknown>) {
   }
   table.push(["Total Cost", `$${Number(stats.total_cost || 0).toFixed(4)}`]);
   console.log(`\n${table.toString()}\n`);
+}
+
+export function getToolbar() {
+  const sessionName = getActiveSessionName();
+  const provider = cfg.getActiveProvider();
+  const planning = cfg.isPlanningMode() ? ` ${chalk.bold.yellow("PLAN")}` : "";
+  const fast = cfg.isFastMode() ? ` ${chalk.bold.cyan("FAST")}` : "";
+  const see = cfg.isSeeMode() ? ` ${chalk.bold.magenta("SEE")}` : "";
+  const policy = ` ${chalk.bold.blue("RUN:" + cfg.getRunPolicy().toUpperCase())}`;
+
+  const providerStyle = chalk.bold(themeColor(THEME.success)(provider));
+  const text = ` CFG Provider: ${providerStyle} \u2022 Session: ${chalk.cyan(sessionName)}${planning}${fast}${see}${policy} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
+
+  const cols = process.stdout.columns || 80;
+  const plainText = ` CFG Provider: ${provider} \u2022 Session: ${sessionName}${planning.replace(/\u001b\[.*?m/g, "")}${fast.replace(/\u001b\[.*?m/g, "")}${see.replace(/\u001b\[.*?m/g, "")}${policy.replace(/\u001b\[.*?m/g, "")} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
+  const padding = Math.max(0, cols - plainText.length);
+
+  const bg = themeBgColor("dim" as any) || chalk.bgGray;
+  return bg(chalk.white(text + " ".repeat(padding)));
+}
+
+/**
+ * Sets the terminal scrolling region to exclude the last line.
+ * This allows a persistent toolbar at the very bottom.
+ */
+export function setupScrollRegion() {
+  const rows = process.stdout.rows || 24;
+  if (rows > 2) {
+    const availableRows = rows - 1; // reserve 1 for toolbar
+    // If current output is very short, don't force a region that might trigger jumps.
+    // We only set the region once we have enough content to scroll or when needed.
+    process.stdout.write(`\x1b[1;${availableRows}r`);
+    // Do not force cursor to bottom; let it stay where it is.
+    // But ensure it's not below the region if we just set it.
+  }
+}
+
+/**
+ * Resets the terminal scrolling region to the full window.
+ */
+export function resetScrollRegion() {
+  process.stdout.write("\x1b[r");
 }

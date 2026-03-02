@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import logUpdate from "log-update";
 import fs from "fs-extra";
 import path from "path";
 import { createHash } from "crypto";
@@ -35,14 +34,14 @@ import { apply, undoLastApply } from "../applier";
 import { isFullAccess } from "./permissions";
 import { intel } from "./intelligence";
 import { manager as procManager } from "./process";
-import type { ExecutionEvent, MissionData, SessionEntry, SessionStats, TaskChange, TaskCommand, TaskPayload } from "../types";
+import type { MissionData, SessionEntry, SessionStats, TaskChange, TaskCommand, TaskPayload } from "../types";
 import { getProvider } from "../providers/manager";
 import { registry } from "../commands/registry";
 import { displayThinking, promptConfirmEdit, showDiff } from "../ui/agent_ui";
-import { renderWorkspaceLayout } from "../ui/layout";
 import {
   MissionBoard,
   THEME,
+  resetScrollRegion,
   console,
   isPromptInputActive,
   liveStatus,
@@ -50,9 +49,9 @@ import {
   printError,
   printInfo,
   printPanel,
-  renderPanel,
   printSuccess,
   printWarning,
+  setMissionActivitySink,
   startThinking,
   stopThinking,
 } from "../ui/console";
@@ -612,31 +611,6 @@ function sanitizeStreamFieldPreview(field: "response" | "thought" | "plan" | "as
   return out.trim();
 }
 
-function formatExecutionActivity(event: ExecutionEvent) {
-  const rel = event.file_path
-    ? path.relative(process.cwd(), String(event.file_path)).replace(/\\/g, "/")
-    : "";
-
-  if (event.phase === "writing_file") {
-    if (event.status === "start") return rel ? `Writing file: ${rel}` : event.message;
-    if (event.status === "end") return rel ? `Wrote file: ${rel}` : event.message;
-  }
-  if (event.phase === "running_command") {
-    const cmd = String(event.command || "").trim();
-    if (event.status === "start") return cmd ? `Running command: ${cmd}` : event.message;
-    if (event.status === "end") {
-      if (typeof event.exit_code === "number") {
-        return `${cmd || "Command"} exited ${event.exit_code}`;
-      }
-      return cmd ? `Finished command: ${cmd}` : event.message;
-    }
-  }
-  if (event.phase === "reading_file" && event.status === "start") return event.message;
-  if (event.phase === "searching_web" && event.status === "start") return event.message;
-  if (event.phase === "error") return `Error: ${event.message}`;
-  return String(event.message || "").trim();
-}
-
 function extractClaimedFilePaths(responseMsg: string) {
   if (!responseMsg) return [];
   const low = responseMsg.toLowerCase();
@@ -1185,12 +1159,6 @@ function canonicalizeSchemaKey(key: string) {
   return SCHEMA_ALIAS_TO_CANONICAL.get(compact) || "";
 }
 
-function truncateForStream(value: string, maxChars = 1200) {
-  const text = String(value || "");
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
-}
-
 function truncateToolResult(value: unknown, maxChars = 14000) {
   const text = String(value || "").trim();
   if (!text) return "(empty)";
@@ -1323,7 +1291,6 @@ function hasToolIntent(data: Record<string, any>) {
 function shouldAutoWebSearchForPrompt(text: string) {
   const raw = String(text || "").trim();
   if (!raw) return false;
-  const low = raw.toLowerCase();
 
   const explicitWeb =
     /\b(web search|search the web|look up|google|internet|online|browse the web|find sources)\b/i.test(raw) ||
@@ -1811,7 +1778,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   if (!isPlanOnly && !safeArgs.__planningPass && Boolean(cfg.get("auto_compact_enabled", true))) {
     const active = load();
     const session = Array.isArray(active.session) ? active.session : [];
-    const used = session.reduce((acc: number, msg: SessionEntry) => acc + estimateTokens(String(msg.content || "")), 0);
+    const used = session.reduce((acc: number, msg: SessionEntry) => acc + estimateTokens(msg.content ?? ""), 0);
     const model = cfg.getModel(providerName);
     const window = estimateContextWindow(providerName, model);
     const thresholdPct = Math.max(1, Math.min(100, Number(cfg.get("auto_compact_threshold_pct", 90))));
@@ -1862,36 +1829,31 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const streamObserver = new CoreStreamingJsonObserver(STREAM_TOOL_KEYS);
   let streamedResponse = "";
   let streamedThought = "";
+  let streamedThinking = "";
   let streamedPlan = "";
 
   let streamedAskUser = "";
-  const turnStartAt = Date.now();
   let announcedStreaming = false;
   let streamUiDisabledForTurn = false;
   let streamUiFallbackNotified = false;
 
   let streamChunkCount = 0;
-  const streamStartAt = Date.now();
   let streamHeartbeat: NodeJS.Timeout | null = null;
-  const spinnerFrames = ["|", "/", "-", "\\"];
   const editingState: {
     active: boolean;
     file: string;
     phase: "stream" | "apply";
     timer: NodeJS.Timeout | null;
-    frameIdx: number;
   } = {
     active: false,
     file: "",
     phase: "stream",
     timer: null,
-    frameIdx: 0,
   };
   let requestWorkspaceRender: (() => void) | null = null;
   const getEditingStatusText = () => {
     if (!editingState.active || !editingState.file) return "";
-    const frame = spinnerFrames[editingState.frameIdx % spinnerFrames.length];
-    return `Currently Editing ${editingState.file} ${frame}`;
+    return `Currently Editing ${editingState.file}`;
   };
   const renderEditingState = () => {
     const text = getEditingStatusText();
@@ -1902,7 +1864,8 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         status_style: editingState.phase === "apply" ? THEME.accent : THEME.warning,
         live_field: editingState.phase === "apply" ? "APPLY" : "STREAM EDIT",
         live_text: text,
-        log: text,
+        // Only log once per file/phase to prevent infinite list of spinner frames
+        log: `${editingState.phase === "apply" ? "Applying" : "Editing"} ${editingState.file}`,
       });
       return;
     }
@@ -1915,12 +1878,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     editingState.phase = phase;
     editingState.active = true;
     if (editingState.timer) return;
-    editingState.frameIdx = 0;
     renderEditingState();
     editingState.timer = setInterval(() => {
-      editingState.frameIdx += 1;
       renderEditingState();
-    }, 90);
+    }, 33);
   };
   const updateEditingSpinner = (file: string, phase: "stream" | "apply") => {
     const nextFile = String(file || "").trim();
@@ -1937,62 +1898,79 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     editingState.active = false;
     editingState.file = "";
     editingState.phase = "stream";
-    editingState.frameIdx = 0;
     if (editingState.timer) {
       clearInterval(editingState.timer);
       editingState.timer = null;
     }
     if (!MISSION_BOARD && requestWorkspaceRender) requestWorkspaceRender();
   };
-  const getRealActivities = (limit = 12) => {
-    const recent = eventBus
-      .getRecent(240)
-      .filter((event) => event.timestamp >= turnStartAt)
-      .map((event) => formatExecutionActivity(event))
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const deduped: string[] = [];
-    for (const line of recent) {
-      if (deduped[deduped.length - 1] === line) continue;
-      deduped.push(line);
-    }
-    return deduped.slice(-Math.max(1, Math.floor(limit)));
-  };
+  let announcedThought = false;
+  let announcedPlan = false;
+  let announcedResponse = false;
+  let lastPrintedPlanLen = 0;
   let lastPrintedResponseLen = 0;
   let lastPrintedThoughtLen = 0;
-  let announcedThought = false;
-  let announcedResponse = false;
   const printStreamDelta = () => {
     if (streamUiDisabledForTurn || isPromptInputActive()) return;
     const split = extractThinkBlocks(streamedResponse || "");
-    const mergedThought = [streamedThought || "", split.thinking || ""].filter(Boolean).join("\n").trim();
+    // Favor raw 'thinking' or extracted '<think>' over schema 'thought'
+    const hasRaw = Boolean(streamedThinking.trim() || split.thinking.trim());
+    const thoughtToPrint = hasRaw ? [streamedThinking.trim(), split.thinking.trim()].filter(Boolean).join("\n") : streamedThought.trim();
+    const mergedThought = thoughtToPrint.trim();
     const displayResponse = stripResponseWrapperText(sanitizeStreamFieldPreview("response", split.response || ""));
     const displayThought = sanitizeStreamFieldPreview("thought", mergedThought);
 
     // Print new thought deltas
     if (displayThought.length > lastPrintedThoughtLen) {
-      if (!announcedThought) {
-        process.stdout.write(`\n${chalk.dim("—".repeat(20))} ${chalk.bold.magenta("AI THOUGHT")} ${chalk.dim("—".repeat(20))}\n`);
+      if (MISSION_BOARD) {
+        lastPrintedThoughtLen = displayThought.length;
+      } else {
+      const alreadyAnnounced = announcedThought || (missionData && (missionData as any).thought_announced);
+      if (!alreadyAnnounced) {
+        process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.magenta("AGENT THINKING")}${chalk.dim("--------")}\n`);
         announcedThought = true;
+        if (missionData) (missionData as any).thought_announced = true;
       }
       const delta = displayThought.slice(lastPrintedThoughtLen);
-      process.stdout.write(chalk.gray(delta));
+      process.stdout.write(chalk.italic(chalk.gray(delta)));
       lastPrintedThoughtLen = displayThought.length;
+      }
+    }
+
+    // Print new plan deltas
+    const displayPlan = sanitizeStreamFieldPreview("plan", streamedPlan || "");
+    if (displayPlan.length > lastPrintedPlanLen) {
+      if (MISSION_BOARD) {
+        lastPrintedPlanLen = displayPlan.length;
+      } else {
+      const alreadyAnnounced = announcedPlan || (missionData && (missionData as any).plan_announced);
+      if (!alreadyAnnounced) {
+        process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.cyan("AGENT PLAN")}${chalk.dim("--------")}\n`);
+        announcedPlan = true;
+        if (missionData) (missionData as any).plan_announced = true;
+      }
+      const delta = displayPlan.slice(lastPrintedPlanLen);
+      process.stdout.write(chalk.cyan(delta));
+      lastPrintedPlanLen = displayPlan.length;
+      }
     }
 
     // Print new response deltas
     if (displayResponse.length > lastPrintedResponseLen) {
-      if (!announcedResponse) {
-        const sep = announcedThought ? "\n" : "";
+      const alreadyAnnounced = announcedResponse || (missionData && (missionData as any).response_announced);
+      if (!alreadyAnnounced) {
+        // Ensure a newline before header if we already had a thought or plan
+        const sep = (announcedThought || announcedPlan) ? "\n" : "";
         process.stdout.write(`${sep}${chalk.dim("—".repeat(20))} ${chalk.bold.green("AI RESPONSE")} ${chalk.dim("—".repeat(20))}\n`);
         announcedResponse = true;
+        if (missionData) (missionData as any).response_announced = true;
       }
       const delta = displayResponse.slice(lastPrintedResponseLen);
       process.stdout.write(delta);
       lastPrintedResponseLen = displayResponse.length;
     }
   };
-  const renderThrottle = createRenderThrottler(Number(cfg.get("stream_render_fps", 24)), printStreamDelta);
+  const renderThrottle = createRenderThrottler(Number(cfg.get("stream_render_fps", 50)), printStreamDelta);
   requestWorkspaceRender = () => {
     if (streamUiDisabledForTurn || isPromptInputActive()) return;
     renderThrottle.request();
@@ -2003,22 +1981,25 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       streamChunkCount += 1;
       if (streamChunkCount === 1) {
         stopThinking();
+        if (!announcedStreaming) {
+          process.stdout.write("\n");
+          printActivity(`Streaming response from ${providerName}.`);
+          announcedStreaming = true;
+          eventBus.emit({
+            phase: "streaming",
+            status: "start",
+            message: `Streaming response from ${providerName}.`,
+          });
+        }
       }
-      if (!announcedStreaming) {
-        printActivity(`Streaming response from ${providerName}.`);
-        eventBus.emit({
-          phase: "streaming",
-          status: "start",
-          message: `Streaming response from ${providerName}.`,
-        });
-        announcedStreaming = true;
-      }
+
       const observed = streamObserver.ingest(chunk);
 
       if (observed.deltas.response) streamedResponse += observed.deltas.response;
       if (observed.deltas.thought) streamedThought += observed.deltas.thought;
       if (observed.deltas.plan) streamedPlan += observed.deltas.plan;
 
+      if (observed.deltas.thinking) streamedThinking += observed.deltas.thinking;
       if (observed.deltas.ask_user) streamedAskUser += observed.deltas.ask_user;
 
       const snapshot = streamObserver.snapshot();
@@ -2029,11 +2010,16 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         parseLooseKvResponse(snapshot.rawTail);
       const liveResponse = normalizeDisplayNewlines(extractCanonicalResponse(liveParsed));
       const liveThought = normalizeDisplayNewlines(extractCanonicalThought(liveParsed));
+      const liveThinking = normalizeDisplayNewlines(String(liveParsed?.thinking || ""));
+
       if (liveResponse && liveResponse.length > streamedResponse.length) {
         streamedResponse = liveResponse;
       }
       if (liveThought && liveThought.length > streamedThought.length) {
         streamedThought = liveThought;
+      }
+      if (liveThinking && liveThinking.length > streamedThinking.length) {
+        streamedThinking = liveThinking;
       }
       const splitStream = extractThinkBlocks(streamedResponse);
       streamedResponse = splitStream.response;
@@ -2046,10 +2032,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
           const label = `Currently Editing ${filePath}`;
           updateEditingSpinner(filePath, "stream");
           if (MISSION_BOARD) {
+            // Only update status, don't log every chunk to avoid history spam
             MISSION_BOARD.update({
-              status: "STREAMING",
+              status: "STREAM EDITING",
               status_style: THEME.accent,
-              log: label,
+              live_text: label,
             });
           }
         }
@@ -2060,31 +2047,27 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       }
 
       if (MISSION_BOARD) {
-        const liveField = streamedAskUser
-          ? "ASK_USER"
-          : streamedThought
-            ? "THOUGHT"
-            : streamedPlan
-              ? "PLAN"
-              : streamedResponse
-                ? "OUTPUT"
-                : "STREAM";
-        const liveText = streamedAskUser
-          ? sanitizeStreamFieldPreview("ask_user", streamedAskUser)
-          : streamedThought
-            ? sanitizeStreamFieldPreview("thought", streamedThought)
-            : streamedPlan
-              ? sanitizeStreamFieldPreview("plan", streamedPlan)
-              : stripResponseWrapperText(sanitizeStreamFieldPreview("response", streamedResponse || snapshot.response || "")).slice(-2400);
-        MISSION_BOARD.update({
-          status: streamedAskUser ? "WAITING FOR USER" : "STREAMING",
-          status_style: streamedAskUser ? THEME.warning : THEME.accent,
-          thought: String(streamedThought || snapshot.thought || ""),
-          tasks: parsePlanTasks(streamedPlan || snapshot.plan || ""),
-          live_field: liveField,
-          live_text: liveText,
-          log: observed.deltas.ask_user ? `AI question: ${String(streamedAskUser).slice(-220)}` : undefined,
-        });
+        // If we are editing, let the spinner handle the live area
+        if (observed.fileEdits.length === 0) {
+          const liveText = streamedAskUser
+            ? sanitizeStreamFieldPreview("ask_user", streamedAskUser)
+            : streamedThought
+              ? "Thinking..."
+              : streamedPlan
+                ? "Planning..."
+                : streamedResponse
+                  ? "Responding..."
+                  : "Streaming...";
+
+          MISSION_BOARD.update({
+            status: streamedAskUser ? "WAITING FOR USER" : "STREAMING",
+            status_style: streamedAskUser ? THEME.warning : THEME.accent,
+            thought: String(streamedThought || snapshot.thought || ""),
+            tasks: parsePlanTasks(streamedPlan || snapshot.plan || ""),
+            live_text: liveText,
+            log: observed.deltas.ask_user ? `AI question: ${String(streamedAskUser).slice(-220)}` : undefined,
+          });
+        }
       }
     } catch (error) {
       streamUiDisabledForTurn = true;
@@ -2515,11 +2498,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   if (!responseMsg && streamSnapshot.response.trim()) responseMsg = streamSnapshot.response.trim();
   const thinkSplit = extractThinkBlocks(responseMsg);
   responseMsg = cleanVisibleAssistantText(thinkSplit.response);
-  const mergedThought = [structuredThought, streamedThought.trim(), rawModelThinking.trim(), thinkSplit.thinking]
-    .map((x) => String(x || "").trim())
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+
+  // Per user request: prioritize raw reasoning (Ollama/tags) over schema thoughts.
+  const rawThinking = [rawModelThinking.trim(), thinkSplit.thinking.trim()].filter(Boolean).join("\n").trim();
+  const mergedThought = rawThinking || structuredThought || streamedThought.trim();
   const thoughtMsg = redactPromptLeak(mergedThought);
   if (!responseMsg.trim()) {
     responseMsg = hasToolIntent(data)
@@ -2622,29 +2604,20 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
   // If response was already streamed to stdout, just add a newline separator.
   // Otherwise (non-streaming or mission mode), print it.
-  const alreadyStreamed = announcedStreaming && !MISSION_BOARD && lastPrintedResponseLen > 0;
+  const alreadyStreamed = announcedStreaming && lastPrintedResponseLen > 0;
   if (responseMsg) {
-    process.stdout.write("\n");
-    // Always render final response through markdown renderer for clean terminal output.
-    console.print(responseMsg);
-    if (alreadyStreamed) process.stdout.write("\n");
+    if (alreadyStreamed) {
+      process.stdout.write("\n");
+    } else {
+      process.stdout.write("\n");
+      // Always render final response through markdown renderer for clean terminal output.
+      console.print(responseMsg);
+    }
   }
+  data.__response_emitted = Boolean(responseMsg);
+  data.__response_streamed = Boolean(alreadyStreamed);
   if (responseMsg && cfg.isVoiceMode()) void speakText(responseMsg);
-  // Minimal runtime UI: response + thought + activity only (no plan/schema panels).
-  if (changes.length && !isFast) {
-    printPanel(changes.map((c) => `- \`${c.file}\``).join("\n"), "Suggested Files", THEME.accent, true, false, true);
-    console.print("\nProposed Changes:");
-    changes.forEach((change) => {
-      try {
-        showDiff(change.file, change.original || "", change.edited || "");
-      } catch (error) {
-        printError(`Error showing diff: ${String(error)}`);
-      }
-    });
-  }
-  if (commands.length && !isFast) {
-    printPanel(commands.map((c) => `- \`${c.command}\`${c.reason ? ` - ${c.reason}` : ""}`).join("\n"), "Proposed Commands", "yellow", true, false, true);
-  }
+  // Removed "Suggested Files" and "Proposed Changes" panels per user request.
 
   const strictEditRequiresFullAccess = Boolean(cfg.get("strict_edit_requires_full_access", true));
   let editBlockedByPolicy = false;
@@ -2802,110 +2775,110 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
             log: `Applying ${changes.length} file change(s).`,
           });
         }
-          const preApply = changes.map((change) => {
-            const full = path.resolve(process.cwd(), change.file);
-            const existed = fs.existsSync(full);
-            const prev = existed ? fs.readFileSync(full, "utf8") : "";
-            return { file: change.file, prev };
-          });
+        const preApply = changes.map((change) => {
+          const full = path.resolve(process.cwd(), change.file);
+          const existed = fs.existsSync(full);
+          const prev = existed ? fs.readFileSync(full, "utf8") : "";
+          return { file: change.file, prev };
+        });
 
-          try {
-            const writeActivity = `Applying ${changes.length} file change(s)...`;
-            await liveStatus(writeActivity, "Applying Changes", async () => {
-              apply(changes, (filePath, existedBefore, idx, total, phase) => {
-                const action = existedBefore ? "Editing" : "Creating";
-                const absPath = path.resolve(process.cwd(), filePath);
-                if (phase === "start") {
-                  updateEditingSpinner(filePath, "apply");
-                  printActivity(`${action} file ${idx}/${total}: ${filePath}`);
-                  if (MISSION_BOARD) {
-                    MISSION_BOARD.update({
-                      status: `APPLYING ${idx}/${total}`,
-                      status_style: THEME.accent,
-                      log: `${action}: ${filePath}`,
-                    });
-                  }
-                  eventBus.emit({
-                    phase: "writing_file",
-                    status: "start",
-                    message: `${action} file ${idx}/${total}: ${filePath}`,
-                    file_path: absPath,
-                  });
-                } else if (phase === "done") {
-                  updateEditingSpinner(filePath, "apply");
-                  eventBus.emit({
-                    phase: "writing_file",
-                    status: "end",
-                    message: `Finished writing ${filePath}`,
-                    file_path: absPath,
-                    success: true,
+        try {
+          const writeActivity = `Applying ${changes.length} file change(s)...`;
+          await liveStatus(writeActivity, "Applying Changes", async () => {
+            apply(changes, (filePath, existedBefore, idx, total, phase) => {
+              const action = existedBefore ? "Editing" : "Creating";
+              const absPath = path.resolve(process.cwd(), filePath);
+              if (phase === "start") {
+                updateEditingSpinner(filePath, "apply");
+                printActivity(`${action} file ${idx}/${total}: ${filePath}`);
+                if (MISSION_BOARD) {
+                  MISSION_BOARD.update({
+                    status: `APPLYING ${idx}/${total}`,
+                    status_style: THEME.accent,
+                    log: `${action}: ${filePath}`,
                   });
                 }
-              });
+                eventBus.emit({
+                  phase: "writing_file",
+                  status: "start",
+                  message: `${action} file ${idx}/${total}: ${filePath}`,
+                  file_path: absPath,
+                });
+              } else if (phase === "done") {
+                updateEditingSpinner(filePath, "apply");
+                eventBus.emit({
+                  phase: "writing_file",
+                  status: "end",
+                  message: `Finished writing ${filePath}`,
+                  file_path: absPath,
+                  success: true,
+                });
+              }
             });
-          } catch (error) {
-            printError(String(error));
-            eventBus.emit({
-              phase: "error",
-              status: "end",
-              message: `Apply failed: ${String(error)}`,
-              success: false,
-            });
-            if (missionData) {
-              const failed = Array.isArray((missionData as Record<string, unknown>).apply_failures)
-                ? ((missionData as Record<string, unknown>).apply_failures as string[])
-                : [];
-              failed.push(String(error));
-              (missionData as Record<string, unknown>).apply_failures = failed;
-              (missionData as Record<string, unknown>).last_tool_status = "apply_failed";
-            }
-            if (MISSION_BOARD) {
-              MISSION_BOARD.update({
-                status: "APPLY FAILED",
-                status_style: THEME.error,
-                log: String(error),
-              });
-            }
-            return null;
-          } finally {
-            stopEditingSpinner();
-          }
-
-          if (missionData && typeof missionData === "object") {
-            const existing = Array.isArray((missionData as Record<string, unknown>).edited_files)
-              ? ((missionData as Record<string, unknown>).edited_files as string[])
-              : [];
-            const merged = [...existing, ...changes.map((x) => x.file)];
-            (missionData as Record<string, unknown>).edited_files = [...new Set(merged)];
-            const applied = Array.isArray((missionData as Record<string, unknown>).applied_files)
-              ? ((missionData as Record<string, unknown>).applied_files as string[])
-              : [];
-            (missionData as Record<string, unknown>).applied_files = [...new Set([...applied, ...changes.map((x) => x.file)])];
-            (missionData as Record<string, unknown>).last_tool_status = `apply_success:${changes.length}`;
-            (missionData as Record<string, unknown>).tool_result_present = true;
-          }
-          for (const change of changes) {
-            if (!LAST_EDITED_FILES.includes(change.file)) LAST_EDITED_FILES.push(change.file);
-            add({ role: "user", input: `I accepted changes for ${change.file}.` });
-          }
-
-          const diffSummaries = preApply.map((item) => {
-            const full = path.resolve(process.cwd(), item.file);
-            const next = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : "";
-            const counts = countDiffLines(item.prev, next);
-            return { file: item.file, added: counts.added, removed: counts.removed };
           });
-          const summaryLines = diffSummaries.map((x) => `- ${x.file}: +${x.added} / -${x.removed}`);
-          recordDiffBatch(text, diffSummaries);
-          printPanel(summaryLines.join("\n"), "Files Changed", THEME.primary, true);
+        } catch (error) {
+          printError(String(error));
+          eventBus.emit({
+            phase: "error",
+            status: "end",
+            message: `Apply failed: ${String(error)}`,
+            success: false,
+          });
+          if (missionData) {
+            const failed = Array.isArray((missionData as Record<string, unknown>).apply_failures)
+              ? ((missionData as Record<string, unknown>).apply_failures as string[])
+              : [];
+            failed.push(String(error));
+            (missionData as Record<string, unknown>).apply_failures = failed;
+            (missionData as Record<string, unknown>).last_tool_status = "apply_failed";
+          }
           if (MISSION_BOARD) {
             MISSION_BOARD.update({
-              status: "CHANGES APPLIED",
-              status_style: THEME.success,
-              log: "File changes applied successfully.",
+              status: "APPLY FAILED",
+              status_style: THEME.error,
+              log: String(error),
             });
           }
+          return null;
+        } finally {
+          stopEditingSpinner();
         }
+
+        if (missionData && typeof missionData === "object") {
+          const existing = Array.isArray((missionData as Record<string, unknown>).edited_files)
+            ? ((missionData as Record<string, unknown>).edited_files as string[])
+            : [];
+          const merged = [...existing, ...changes.map((x) => x.file)];
+          (missionData as Record<string, unknown>).edited_files = [...new Set(merged)];
+          const applied = Array.isArray((missionData as Record<string, unknown>).applied_files)
+            ? ((missionData as Record<string, unknown>).applied_files as string[])
+            : [];
+          (missionData as Record<string, unknown>).applied_files = [...new Set([...applied, ...changes.map((x) => x.file)])];
+          (missionData as Record<string, unknown>).last_tool_status = `apply_success:${changes.length}`;
+          (missionData as Record<string, unknown>).tool_result_present = true;
+        }
+        for (const change of changes) {
+          if (!LAST_EDITED_FILES.includes(change.file)) LAST_EDITED_FILES.push(change.file);
+          add({ role: "user", input: `I accepted changes for ${change.file}.` });
+        }
+
+        const diffSummaries = preApply.map((item) => {
+          const full = path.resolve(process.cwd(), item.file);
+          const next = fs.existsSync(full) ? fs.readFileSync(full, "utf8") : "";
+          const counts = countDiffLines(item.prev, next);
+          return { file: item.file, added: counts.added, removed: counts.removed };
+        });
+        const summaryLines = diffSummaries.map((x) => `- ${x.file}: +${x.added} / -${x.removed}`);
+        recordDiffBatch(text, diffSummaries);
+        printPanel(summaryLines.join("\n"), "Files Changed", THEME.primary, true);
+        if (MISSION_BOARD) {
+          MISSION_BOARD.update({
+            status: "CHANGES APPLIED",
+            status_style: THEME.success,
+            log: "File changes applied successfully.",
+          });
+        }
+      }
 
       if (commands.length) {
         const policy = cfg.getRunPolicy();
@@ -2982,8 +2955,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         `Files applied: ${changes.length}`,
         `Commands proposed: ${commands.length}`,
       ].join("\n");
-      if (!MISSION_BOARD) {
+      if (!inMission) {
         printPanel(completionSummary, "Finished", THEME.success, true);
+      } else {
+        const sc = missionData ? (missionData as any).step_count : "complete";
+        process.stdout.write(`\n${chalk.green("\u2713")} Step ${sc || "complete"}\n`);
       }
       eventBus.emit({
         phase: "finished",
@@ -2994,6 +2970,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
       add({ input: text, response: responseMsg, changes: changes.length, plan: String(planText) });
       stopEditingSpinner();
+      resetScrollRegion();
       return data;
     }
 
@@ -3007,6 +2984,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         });
       }
       stopEditingSpinner();
+      resetScrollRegion();
       return null;
     }
 
@@ -3017,6 +2995,14 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 }
 export async function missionLoop(text: string, args: HandleArgs) {
   MISSION_BOARD = new MissionBoard("Agent CLI Mission Board");
+  setMissionActivitySink((activityText: string) => {
+    if (!MISSION_BOARD) return;
+    MISSION_BOARD.update({
+      status: "RUNNING TOOLS",
+      status_style: THEME.accent,
+      live_text: activityText,
+    });
+  });
   MISSION_BOARD.update({
     status: "MISSION START",
     status_style: THEME.accent,
@@ -3024,32 +3010,40 @@ export async function missionLoop(text: string, args: HandleArgs) {
     tasks: [],
     thought: "",
   });
-  const missionData: MissionData = { is_mission: true };
+
+  const missionData: MissionData = { is_mission: true, step_count: 1 };
   let stepCount = 1;
   let idleSteps = 0;
   let completionData: Record<string, any> = {};
 
+  // Map of action summaries for the final report
+  const stepSummaries: string[] = [];
+
+  // Configurable max steps (user can override via config)
+  const maxSteps = Math.max(10, Number(cfg.get("mission_max_steps", MISSION_MAX_STEPS)));
+
   while (true) {
-    if (stepCount > MISSION_MAX_STEPS) {
-      printWarning(`Mission stopped: reached max step limit (${MISSION_MAX_STEPS}).`);
+    if (stepCount > maxSteps) {
+      printWarning(`Mission stopped: reached max step limit (${maxSteps}).`);
       if (MISSION_BOARD) {
         MISSION_BOARD.update({
           status: "MISSION STOPPED",
           status_style: THEME.warning,
-          log: `Max step limit reached (${MISSION_MAX_STEPS}).`,
+          log: `Max step limit reached (${maxSteps}).`,
         });
       }
       break;
     }
-    printInfo(`Mission step ${stepCount}`);
+
     if (MISSION_BOARD) {
       MISSION_BOARD.update({
-        status: `MISSION STEP ${stepCount}`,
+        status: `STEP ${stepCount}`,
         status_style: THEME.accent,
-        log: `Step ${stepCount} started`,
+        log: `Step ${stepCount}: planning`,
       });
     }
-    printActivity(`Mission step ${stepCount}: planning pass.`);
+
+    // --- Planning pass ---
     const planningData = await handle(
       text,
       {
@@ -3061,6 +3055,7 @@ export async function missionLoop(text: string, args: HandleArgs) {
       },
       missionData,
     );
+
     let stepPlan = "";
     if (planningData && typeof planningData === "object") {
       const pd = planningData as Record<string, unknown>;
@@ -3068,15 +3063,24 @@ export async function missionLoop(text: string, args: HandleArgs) {
       const stepThought = String(pd.thought || "").trim();
       const planFilePath = writePlanArtifact(`MISSION STEP ${stepCount}\n${text}`, stepPlan, stepThought);
       (missionData as Record<string, unknown>).step_plan_file = planFilePath;
-      printActivity(`Mission step ${stepCount}: plan saved to ${planFilePath}`);
     }
-    printActivity(`Mission step ${stepCount}: execution pass.`);
+
+    if (MISSION_BOARD) {
+      MISSION_BOARD.update({
+        status: `STEP ${stepCount}`,
+        status_style: THEME.accent,
+        log: `Step ${stepCount}: executing`,
+      });
+    }
+
+    // --- Execution pass ---
     const executionText = [
       text,
       "",
       `Mission step ${stepCount} plan:`,
       stepPlan || "(no explicit plan text provided by model)",
     ].join("\n");
+
     const data = await handle(
       executionText,
       {
@@ -3089,6 +3093,7 @@ export async function missionLoop(text: string, args: HandleArgs) {
       },
       missionData,
     );
+
     if (!data) {
       printWarning("Mission stopped.");
       if (MISSION_BOARD) {
@@ -3100,13 +3105,17 @@ export async function missionLoop(text: string, args: HandleArgs) {
       }
       break;
     }
+
     let planValue = data.plan || "";
     if (Array.isArray(planValue)) planValue = planValue.map((x) => String(x)).join("\n");
-    const complete = Boolean(data.mission_complete) || String(planValue).trim().toUpperCase() === "MISSION COMPLETE";
+    const complete =
+      Boolean(data.mission_complete) || String(planValue).trim().toUpperCase() === "MISSION COMPLETE";
+
     if (complete) {
       completionData = {
         response: stripResponseWrapperText(String(data.response || "Mission completed successfully.")),
         thought: data.thought || "Objective achieved.",
+        response_emitted: Boolean((data as Record<string, unknown>).__response_emitted),
       };
       if (MISSION_BOARD) {
         MISSION_BOARD.update({
@@ -3119,6 +3128,7 @@ export async function missionLoop(text: string, args: HandleArgs) {
       break;
     }
 
+    // --- Tool activity detection ---
     const toolKeys = [
       "request_files",
       "web_search",
@@ -3130,8 +3140,6 @@ export async function missionLoop(text: string, args: HandleArgs) {
       "terminal_input",
       "terminal_read",
       "terminal_kill",
-      "changes",
-      "commands",
       "tool_result_present",
       "tool_activity_count",
       "command_results",
@@ -3145,43 +3153,86 @@ export async function missionLoop(text: string, args: HandleArgs) {
       "mcp_results",
     ];
     const dataObj = data as Record<string, any>;
-    const toolUsed = toolKeys.some((key) => Boolean(dataObj[key])) || Boolean((missionData as Record<string, unknown>).tool_result_present);
+    const hasToolKey = toolKeys.some((key) => Boolean(dataObj[key]));
+    const hasChanges = Array.isArray(dataObj.changes) ? dataObj.changes.length > 0 : Boolean(dataObj.changes);
+    const hasCommands = Array.isArray(dataObj.commands) ? dataObj.commands.length > 0 : Boolean(dataObj.commands);
+
+    const toolUsed =
+      hasToolKey || hasChanges || hasCommands || Boolean((missionData as Record<string, unknown>).tool_result_present);
+
     if (toolUsed) {
       idleSteps = 0;
+
+      // Collect per-step action summary for the final report
+      const actionParts: string[] = [];
+      if (hasChanges) {
+        const files = (Array.isArray(dataObj.changes) ? dataObj.changes : [dataObj.changes])
+          .map((c: any) => c?.file || "(unknown)")
+          .filter(Boolean);
+        actionParts.push(`Edited: ${files.join(", ")}`);
+      }
+      if (hasCommands) {
+        const cmds = (Array.isArray(dataObj.commands) ? dataObj.commands : [dataObj.commands])
+          .map((c: any) => c?.command || "(unknown)")
+          .filter(Boolean);
+        actionParts.push(`Ran: ${cmds.join("; ")}`);
+      }
+      if (hasToolKey) {
+        actionParts.push("Used tool");
+      }
+      const summary = actionParts.join(" | ") || "Action taken";
+      stepSummaries.push(`Step ${stepCount}: ${summary}`);
+
       stepCount += 1;
       (missionData as Record<string, unknown>).step = stepCount;
       (missionData as Record<string, unknown>).tool_result_present = false;
       (missionData as Record<string, unknown>).tool_activity_count = 0;
-      printInfo(`Action turn complete. Moving to step ${stepCount}.`);
+
       if (MISSION_BOARD) {
         MISSION_BOARD.update({
           status: "ACTION COMPLETE",
           status_style: THEME.secondary,
-          log: `Continuing to step ${stepCount}.`,
+          log: `${summary} — continuing to step ${stepCount}.`,
         });
       }
       continue;
     }
 
+    // --- Idle step handling ---
     idleSteps += 1;
     const lastToolStatus = String((missionData as Record<string, unknown>).last_tool_status || "no_tools");
-    const status = `No tool action detected (${idleSteps}/${MISSION_IDLE_LIMIT}) [${lastToolStatus}].`;
-    printWarning(status);
-    if (MISSION_BOARD) {
-      MISSION_BOARD.update({
-        status: "MISSION IDLE",
-        status_style: THEME.warning,
-        log: status,
-      });
+
+    if (idleSteps === 1) {
+      // First idle: gently nudge the model with context
+      const nudge = "No tool action was detected. Please take a concrete action toward the objective.";
+      printWarning(`[Mission] Idle step ${idleSteps}/${MISSION_IDLE_LIMIT}: ${lastToolStatus}`);
+      if (MISSION_BOARD) {
+        MISSION_BOARD.update({
+          status: "MISSION IDLE",
+          status_style: THEME.warning,
+          log: `Idle (${idleSteps}/${MISSION_IDLE_LIMIT}): ${nudge}`,
+        });
+      }
+      (missionData as Record<string, unknown>).idle_hint = nudge;
+    } else {
+      const status = `No tool action detected (${idleSteps}/${MISSION_IDLE_LIMIT}) [${lastToolStatus}].`;
+      printWarning(status);
+      if (MISSION_BOARD) {
+        MISSION_BOARD.update({
+          status: "MISSION IDLE",
+          status_style: THEME.warning,
+          log: status,
+        });
+      }
     }
 
     if (idleSteps >= MISSION_IDLE_LIMIT) {
-      printWarning("Mission aborted to prevent stalling. Try a clearer objective or /plan first.");
+      printWarning("Mission aborted: agent is not making progress. Provide a clearer objective or use /plan first.");
       if (MISSION_BOARD) {
         MISSION_BOARD.update({
           status: "MISSION ABORTED",
           status_style: THEME.error,
-          log: "Autonomous idle limit reached.",
+          log: "Autonomous idle limit reached. Mission aborted.",
         });
       }
       break;
@@ -3189,11 +3240,12 @@ export async function missionLoop(text: string, args: HandleArgs) {
 
     (missionData as Record<string, unknown>).force_action = true;
     (missionData as Record<string, unknown>).idle_steps = idleSteps;
-    printInfo("Continuing mission autonomously...");
     stepCount += 1;
+    if (missionData) (missionData as any).step_count = stepCount;
     (missionData as Record<string, unknown>).step = stepCount;
   }
 
+  // --- Teardown and final output ---
   if (MISSION_BOARD) {
     MISSION_BOARD.update({
       status: "MISSION FINISHED",
@@ -3203,9 +3255,21 @@ export async function missionLoop(text: string, args: HandleArgs) {
     MISSION_BOARD.close();
   }
   MISSION_BOARD = null;
-  if (completionData.response) {
+  setMissionActivitySink(null);
+
+  // Print step summary
+  if (stepSummaries.length > 0) {
+    process.stdout.write("\n");
+    console.log(chalk.bold("Mission Steps Summary:"));
+    for (const s of stepSummaries) {
+      console.log(chalk.dim(` • ${s}`));
+    }
+    process.stdout.write("\n");
+  }
+
+  if (completionData.response && !Boolean((completionData as Record<string, unknown>).response_emitted)) {
     console.print(String(completionData.response));
-    if (completionData.thought) {
+    if (completionData.thought && Boolean(cfg.get("think_mode", false))) {
       process.stdout.write("\n");
       console.print(chalk.gray(String(completionData.thought)));
     }

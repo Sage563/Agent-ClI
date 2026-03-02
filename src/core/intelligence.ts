@@ -1,7 +1,7 @@
 import fs from "fs-extra";
 import path from "path";
 
-const IGNORE_DIRS = new Set([".git", "venv", "node_modules", "__pycache__", ".pytest_cache", ".vscode", "dist", "build"]);
+const IGNORE_DIRS = new Set([".git", "venv", "node_modules", "__pycache__", ".pytest_cache", ".vscode",]);
 const ALLOWED_EXT = [".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".html", ".css"];
 
 export class ProjectIntel {

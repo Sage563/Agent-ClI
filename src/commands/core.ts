@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import os from "os";
 import path from "path";
 import { registry } from "./registry";
-import { cfg } from "../config";
+import { cfg, MODEL_CONTEXT_WINDOWS } from "../config";
 import { clearScreen, printError, printInfo, printPanel, printSuccess, printWarning } from "../ui/console";
 import logUpdate from "log-update";
 import { estimateTokens, load, compactSession } from "../memory";
@@ -11,23 +11,7 @@ import { printSessionStats } from "../ui/console";
 import { intel } from "../core/intelligence";
 let PREV_CWD = process.cwd();
 
-const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  "gpt-4o": 128000,
-  "gpt-4o-mini": 128000,
-  "gpt-4-turbo": 128000,
-  o1: 200000,
-  "o1-mini": 128000,
-  "o3-mini": 200000,
-  "claude-sonnet-4-20250514": 200000,
-  "claude-3-5-sonnet-20241022": 200000,
-  "claude-3-5-haiku-20241022": 200000,
-  "claude-3-opus-20240229": 200000,
-  "gemini-2.5-pro-preview-06-05": 1048576,
-  "gemini-2.5-flash-preview-05-20": 1048576,
-  "gemini-2.0-flash": 1048576,
-  "deepseek-chat": 64000,
-  "deepseek-reasoner": 64000,
-};
+
 
 function estimateContextWindow(provider: string, model: string) {
   if (provider === "ollama") {
@@ -133,7 +117,7 @@ registry.register("/cls", "Clear the terminal screen", ["/clear_screen"])(() => 
 
 registry.register("/donut", "Show an animated donut and exit")(
   async () => {
-    printInfo("You found my little secret... Hmm I don't know what to do with this donut. WAIT WHY  ARE YOU HERE .... goodbye! 🍩");
+    printInfo("You found my little secret... Hmm I don't know what to do with this donut. WAIT WHY  ARE YOU HERE .... goodbye!");
     const frames = [
       "   ***   \n *     * \n*  o o  *\n*   -   *\n *     * \n   ***   ",
       "   ***   \n *     * \n*  o o  *\n*   ~   *\n *     * \n   ***   ",
@@ -253,7 +237,7 @@ registry.register("/cost", "Show session token usage, cost, and time", ["/stats"
   const model = cfg.getModel(provider);
   const data = load();
   const session = data.session || [];
-  const contextUsed = session.reduce((acc, msg) => acc + estimateTokens(msg.content || ""), 0);
+  const contextUsed = session.reduce((acc, msg) => acc + estimateTokens(msg.content ?? ""), 0);
   const contextWindow = estimateContextWindow(provider, model);
   const contextLeft = contextWindow > 0 ? Math.max(contextWindow - contextUsed, 0) : null;
   const { SESSION_STATS } = require("../core/agent");

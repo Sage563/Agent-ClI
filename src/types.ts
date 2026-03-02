@@ -77,9 +77,11 @@ export type TaskCommand = {
   reason?: string;
 };
 
+export type MessageContent = string | Array<string | Record<string, any>>;
+
 export type SessionEntry = {
   role: string;
-  content: string;
+  content: MessageContent;
   changes?: number;
   time?: number;
 };
@@ -128,6 +130,7 @@ export type ConfigShape = {
   stream_timeout_ms?: number;
   stream_retry_count?: number;
   stream_render_fps?: number;
+  mission_render_fps?: number;
   command_timeout_ms?: number;
   command_log_enabled?: boolean;
   strict_edit_requires_full_access?: boolean;

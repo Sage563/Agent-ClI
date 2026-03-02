@@ -1,8 +1,7 @@
 import { exec } from "child_process";
 import { getProjectFiles } from "./file_browser";
 import { cfg } from "./config";
-import { getActiveSessionName } from "./memory";
-import { THEME, console as consoleUi, themeBgColor, themeColor } from "./ui/console";
+import { THEME, console as consoleUi, setupScrollRegion, getToolbar, themeColor, setPromptInputActive } from "./ui/console";
 import { openContextPicker } from "./ui/context_picker";
 import chalk from "chalk";
 import readline from "readline";
@@ -10,26 +9,6 @@ import logUpdate from "log-update";
 
 let isRawMode = false;
 let lastInputRenderRows = 0;
-
-function getToolbar() {
-  const sessionName = getActiveSessionName();
-  const provider = cfg.getActiveProvider();
-  const planning = cfg.isPlanningMode() ? ` ${chalk.bold.yellow("PLAN")}` : "";
-  const fast = cfg.isFastMode() ? ` ${chalk.bold.cyan("FAST")}` : "";
-  const see = cfg.isSeeMode() ? ` ${chalk.bold.magenta("SEE")}` : "";
-  const policy = ` ${chalk.bold.blue("RUN:" + cfg.getRunPolicy().toUpperCase())}`;
-
-  const providerStyle = chalk.bold(themeColor(THEME.success)(provider));
-  const text = ` \u2699 Provider: ${providerStyle} \u2022 Session: ${chalk.cyan(sessionName)}${planning}${fast}${see}${policy} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
-
-  const cols = process.stdout.columns || 80;
-  // Use a simpler approach for terminal width padding
-  const plainText = ` \u2699 Provider: ${provider} \u2022 Session: ${sessionName}${planning.replace(/\u001b\[.*?m/g, "")}${fast.replace(/\u001b\[.*?m/g, "")}${see.replace(/\u001b\[.*?m/g, "")}${policy.replace(/\u001b\[.*?m/g, "")} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
-  const padding = Math.max(0, cols - plainText.length);
-
-  const bg = themeBgColor("dim" as any) || chalk.bgGray;
-  return bg(chalk.white(text + " ".repeat(padding)));
-}
 
 function cursorLineCol(text: string, cursorPos: number) {
   const clamped = Math.max(0, Math.min(text.length, cursorPos));
@@ -57,8 +36,13 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number) {
   // Clear screen below cursor just in case, then hide cursor during render
   process.stdout.write("\x1b[?25l");
 
-  // Move to a clean line and clear below
-  process.stdout.write("\x1b[2K\x1b[G\x1b[J");
+  // Move to a clean line and clear below ONLY if we've rendered before.
+  // This preserves the "Ready" panel on the very first render.
+  if (lastInputRenderRows > 0) {
+    process.stdout.write("\x1b[2K\x1b[G\x1b[J");
+  } else {
+    process.stdout.write("\x1b[G"); // Just move to start of line
+  }
 
   // Render true multiline input without marker artifacts.
   const promptStyled = chalk.bold(themeColor(THEME.primary)(promptText));
@@ -145,7 +129,7 @@ export async function promptMultiline(message = "Enter input:") {
   return await customInputLoop("> ");
 }
 
-async function customInputLoop(promptStr: string = "agent-cli > "): Promise<string> {
+async function customInputLoop(promptStr: string = "agent-cli> "): Promise<string> {
   return new Promise((resolve) => {
     let inputBuffer = "";
     let cursorOffset = 0; // offset from end of string (0 = at end)
@@ -158,6 +142,7 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
     isRawMode = true;
+    // setupScrollRegion is now handled externally or stays active
 
     const cleanup = () => {
       process.stdin.setRawMode(false);
@@ -167,13 +152,14 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
       lastInputRenderRows = 0;
       // Keep stdin resumed so next prompt is immediately interactive.
       process.stdin.resume();
-      process.stdout.write("\x1b[2K\x1b[G");
+      // process.stdout.write("\x1b[2K\x1b[G"); // Removed to preserve prompt
       // Do not re-echo submitted prompt text here; it can duplicate the already-rendered input line.
       process.stdout.write("\n");
       process.stdout.write("\x1b[?25h");
     };
 
     const onResize = () => {
+      setupScrollRegion();
       try {
         render(promptStr, inputBuffer, cursorOffset);
       } catch {
@@ -215,8 +201,6 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
       return out;
     };
 
-    const isUp = (key: string) => key === "\x1b[A" || key === "\x1bOA" || /^\x1b\[\d+;\d+A$/.test(key);
-    const isDown = (key: string) => key === "\x1b[B" || key === "\x1bOB" || /^\x1b\[\d+;\d+B$/.test(key);
     const isLeft = (key: string) => key === "\x1b[D" || key === "\x1bOD" || /^\x1b\[\d+;\d+D$/.test(key);
     const isRight = (key: string) => key === "\x1b[C" || key === "\x1bOC" || /^\x1b\[\d+;\d+C$/.test(key);
     const isMouseSequence = (key: string) => key.startsWith("\x1b[<") || key.startsWith("\x1b[M");
@@ -231,119 +215,127 @@ async function customInputLoop(promptStr: string = "agent-cli > "): Promise<stri
     const isF6 = (key: string) => key === "\x1b[17~";
 
     const onData = (chunk: string) => {
-      for (const key of splitChunk(chunk)) {
-      if (pickerActive) continue;
-      const realCursorPos = inputBuffer.length - cursorOffset;
+      // Ignore focus events or empty chunks that arrive on Alt+Tab or terminal refocus
+      if (!chunk || chunk === "\x1b[I" || chunk === "\x1b[O") return;
 
-      // Ctrl+C
-      if (key === '\u0003') {
-        inputBuffer = "";
-        cursorOffset = 0;
+      for (const key of splitChunk(chunk)) {
+        if (pickerActive) continue;
+        const realCursorPos = inputBuffer.length - cursorOffset;
+
+        // Ctrl+C
+        if (key === '\u0003') {
+          inputBuffer = "";
+          cursorOffset = 0;
+          try {
+            render(promptStr, inputBuffer, cursorOffset);
+          } catch {
+            // ignore redraw failure and continue input collection
+          }
+          continue;
+        }
+
+        if (isF6(key)) {
+          exec("code .", { timeout: 5_000 }, (error) => {
+            if (error) {
+              consoleUi.print(themeColor(THEME.error)("Failed to open IDE. Ensure `code` command is available."));
+            } else {
+              consoleUi.print(themeColor(THEME.success)("Opened IDE (VS Code)."));
+            }
+          });
+          continue;
+        }
+
+        // CRLF from some terminals arrives as two events. Ignore the follow-up LF.
+        if (key === "\n" && suppressNextLf) {
+          suppressNextLf = false;
+          continue;
+        }
+
+        // Ctrl+Enter / F5 / Enter submit from the prompt line.
+        const isForceSubmitKey =
+          key === '\x1b[15~' || // F5
+          isCtrlEnter(key);
+        const isEnterKey = key === '\r' || key === '\n';
+        const shouldSubmit =
+          isForceSubmitKey ||
+          isEnterKey;
+
+        if (shouldSubmit || isEnterKey) {
+          if (key === "\r") suppressNextLf = true;
+          // Submit
+          try {
+            // Render final state with cursor at end before cleaning up
+            render(promptStr, inputBuffer, 0);
+          } catch { /* ignore */ }
+          cleanup();
+          resolve(inputBuffer);
+          return;
+        }
+        // Tab
+        else if (key === '\t') {
+          inputBuffer = inputBuffer.substring(0, realCursorPos) + "\t" + inputBuffer.substring(realCursorPos);
+          cursorOffset = inputBuffer.length - (realCursorPos + 1);
+        }
+        // Backspace
+        else if (key === '\x7f' || key === '\b') {
+          if (realCursorPos > 0) {
+            inputBuffer = inputBuffer.substring(0, realCursorPos - 1) + inputBuffer.substring(realCursorPos);
+            cursorOffset = inputBuffer.length - (realCursorPos - 1);
+          }
+        }
+        // Arrow Keys (ANSI sequences)
+        else if (key.startsWith('\x1b[') || key.startsWith("\x1bO")) {
+          if (isMouseSequence(key)) {
+            // Ignore mouse wheel/drag sequences so scrolling doesn't inject input behavior.
+          } else if (isRight(key)) { // Right
+            if (cursorOffset > 0) cursorOffset--;
+          } else if (isLeft(key)) { // Left
+            if (cursorOffset < inputBuffer.length) cursorOffset++;
+          }
+        }
+        // ESC: ignore.
+        else if (key === "\x1b") {
+          // Ignored.
+        }
+        // Normal characters
+        else if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
+          if (key === '@') {
+            pickerActive = true;
+            void (async () => {
+              try {
+                const result = await openContextPicker({ maxPreviewLines: 20 });
+                if (result.action === "confirm" && result.selected.length > 0) {
+                  const invalid = result.selected.filter((p) => /\s/.test(p));
+                  const safe = result.selected.filter((p) => !/\s/.test(p));
+                  if (invalid.length) {
+                    consoleUi.print(themeColor(THEME.warning)(`Skipped ${invalid.length} path(s) with spaces.`));
+                  }
+                  if (safe.length) {
+                    const tokens = safe.map((p) => `@${p}`).join(" ") + " ";
+                    inputBuffer = inputBuffer.substring(0, realCursorPos) + tokens + inputBuffer.substring(realCursorPos);
+                    cursorOffset = inputBuffer.length - (realCursorPos + tokens.length);
+                  }
+                }
+              } finally {
+                pickerActive = false;
+                try {
+                  render(promptStr, inputBuffer, cursorOffset);
+                } catch {
+                  // ignore redraw failure and continue input collection
+                }
+              }
+            })();
+            continue;
+          }
+          inputBuffer = inputBuffer.substring(0, realCursorPos) + key + inputBuffer.substring(realCursorPos);
+          cursorOffset = inputBuffer.length - (realCursorPos + 1);
+        }
+
         try {
           render(promptStr, inputBuffer, cursorOffset);
         } catch {
           // ignore redraw failure and continue input collection
         }
-        continue;
-      }
-
-      if (isF6(key)) {
-        exec("code .", { timeout: 5_000 }, (error) => {
-          if (error) {
-            consoleUi.print(themeColor(THEME.error)("Failed to open IDE. Ensure `code` command is available."));
-          } else {
-            consoleUi.print(themeColor(THEME.success)("Opened IDE (VS Code)."));
-          }
-        });
-        continue;
-      }
-
-      // CRLF from some terminals arrives as two events. Ignore the follow-up LF.
-      if (key === "\n" && suppressNextLf) {
-        suppressNextLf = false;
-        continue;
-      }
-
-      // Ctrl+Enter / F5 / Enter submit from the prompt line.
-      const isForceSubmitKey =
-        key === '\x1b[15~' || // F5
-        isCtrlEnter(key);
-      const isEnterKey = key === '\r' || key === '\n';
-      const shouldSubmit =
-        isForceSubmitKey ||
-        isEnterKey;
-
-      if (shouldSubmit || isEnterKey) {
-        if (key === "\r") suppressNextLf = true;
-        // Submit
-        cleanup();
-        resolve(inputBuffer);
-        return;
-      }
-      // Tab
-      else if (key === '\t') {
-        inputBuffer = inputBuffer.substring(0, realCursorPos) + "\t" + inputBuffer.substring(realCursorPos);
-        cursorOffset = inputBuffer.length - (realCursorPos + 1);
-      }
-      // Backspace
-      else if (key === '\x7f' || key === '\b') {
-        if (realCursorPos > 0) {
-          inputBuffer = inputBuffer.substring(0, realCursorPos - 1) + inputBuffer.substring(realCursorPos);
-          cursorOffset = inputBuffer.length - (realCursorPos - 1);
-        }
-      }
-      // Arrow Keys (ANSI sequences)
-      else if (key.startsWith('\x1b[') || key.startsWith("\x1bO")) {
-        if (isMouseSequence(key)) {
-          // Ignore mouse wheel/drag sequences so scrolling doesn't inject input behavior.
-        } else if (isRight(key)) { // Right
-          if (cursorOffset > 0) cursorOffset--;
-        } else if (isLeft(key)) { // Left
-          if (cursorOffset < inputBuffer.length) cursorOffset++;
-        }
-      }
-      // ESC: ignore.
-      else if (key === "\x1b") {
-      }
-      // Normal characters
-      else if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
-        if (key === '@') {
-          pickerActive = true;
-          void (async () => {
-            try {
-              const result = await openContextPicker({ maxPreviewLines: 20 });
-              if (result.action === "confirm" && result.selected.length > 0) {
-                const invalid = result.selected.filter((p) => /\s/.test(p));
-                const safe = result.selected.filter((p) => !/\s/.test(p));
-                if (invalid.length) {
-                  consoleUi.print(themeColor(THEME.warning)(`Skipped ${invalid.length} path(s) with spaces.`));
-                }
-                if (safe.length) {
-                  const tokens = safe.map((p) => `@${p}`).join(" ") + " ";
-                  inputBuffer = inputBuffer.substring(0, realCursorPos) + tokens + inputBuffer.substring(realCursorPos);
-                  cursorOffset = inputBuffer.length - (realCursorPos + tokens.length);
-                }
-              }
-            } finally {
-              pickerActive = false;
-              try {
-                render(promptStr, inputBuffer, cursorOffset);
-              } catch {
-                // ignore redraw failure and continue input collection
-              }
-            }
-          })();
-          continue;
-        }
-        inputBuffer = inputBuffer.substring(0, realCursorPos) + key + inputBuffer.substring(realCursorPos);
-        cursorOffset = inputBuffer.length - (realCursorPos + 1);
-      }
-
-      try {
-        render(promptStr, inputBuffer, cursorOffset);
-      } catch {
-        // ignore redraw failure and continue input collection
-      }
       }
     };
 
@@ -381,7 +373,9 @@ export async function loop(cb: (text: string) => Promise<unknown> | unknown) {
   try {
     while (true) {
       // Use fallback if not a TTY
-      const value = process.stdin.isTTY ? await customInputLoop("agent-cli > ") : await fallbackInputLoop("agent-cli > ");
+      setPromptInputActive(true);
+      const value = process.stdin.isTTY ? await customInputLoop("agent-cli> ") : await fallbackInputLoop("agent-cli> ");
+      setPromptInputActive(false);
       const stripped = value.trim();
 
       if (!stripped) continue;

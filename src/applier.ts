@@ -13,7 +13,7 @@ const UNDO_STACK: UndoEntry[][] = [];
 function normalizeNewlines(value: string) {
   if (!value) return "";
   // Handle literal escaped \n strings that might come from JSON if not properly parsed
-  let val = String(value).replace(/\\n/g, "\n");
+  const val = String(value).replace(/\\n/g, "\n");
   return val.replace(/\r?\n/g, "\n");
 }
 
@@ -22,7 +22,7 @@ function replaceByTrimmedLineBlock(current: string, original: string, edited: st
   const needleLines = original.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0);
   if (!needleLines.length) return null;
 
-  let outLines = [...lines];
+  const outLines = [...lines];
   let replacedCount = 0;
 
   for (let i = 0; i <= outLines.length - needleLines.length; i += 1) {
@@ -70,7 +70,7 @@ export function apply(
 
       let nextContent = "";
       if (existedBefore) {
-        let current = previousContent || "";
+        const current = previousContent || "";
 
         // Line-number-based editing: replace lines [start_line..end_line] with edited content
         if (change.start_line && change.end_line && (!change.original || change.original.trim() === "")) {

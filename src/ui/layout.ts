@@ -31,7 +31,7 @@ function section(title: string, body: string, color: (s: string) => string, widt
 }
 
 export function renderWorkspaceLayout(params: WorkspaceLayoutParams) {
-  const cols = Math.max(60, process.stdout.columns || 120);
+  const cols = Math.max(60, Math.min(100, process.stdout.columns || 120));
   const activity = (params.activity || []).slice(-12).map((x) => `  ${x}`).join("\n") || chalk.gray("_none_");
   const fileTree = (params.fileTree || []).slice(-12).map((x) => `  ${x}`).join("\n") || chalk.gray("_none_");
   const terminalOutput = params.terminalOutput || chalk.gray("_none_");

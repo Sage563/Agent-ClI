@@ -1,192 +1,263 @@
-# Agent CLI
+<div align="center">
+  <h1>Agent CLI</h1>
+  <p><strong>A powerful, terminal-first, autonomous AI coding assistant.</strong></p>
+</div>
+
+---
 
 ## Overview
-Agent CLI is an autonomous, terminal-first AI coding assistant that acts as a true agent—it talks with you and writes code directly in your project. Similar to tools like **Claude Code** and **Aider**, it doesn't just suggest code; it actively executes real project work, refactors, and runs terminal commands autonomously. It supports local and remote models, structured file edits, command execution, mission mode, web search, and transparent task lifecycle updates.
 
-## Features
-- **True AI Agent**: It talks, codes, and executes tasks directly in your workspace.
-- CLI/TUI workspace with activity, status, and streaming output.
-- Code-first agent behavior (`changes[]` and `commands[]` focused).
-- Session-level access control (`full` or `selective` file access).
-- Provider support: Ollama, OpenAI, Anthropic, Gemini, DeepSeek.
-- Web search and browse tooling with visible sources.
-- Mission mode for autonomous multi-step execution.
-- Command logging with exit codes and captured output.
+**Agent CLI** is not just another autocomplete tool. It is an **autonomous, terminal-first AI coding assistant** that acts as a true agent in your workflow. Like Claude Code or Aider, it doesn't simply suggest code—it actively executes real project work, refactors entire components, and runs terminal commands autonomously. 
 
-## Installation
+Built for developers who live in the terminal, Agent CLI provides a robust CLI/TUI hybrid experience that keeps you informed with transparent task lifecycle updates, streaming output, and deep integration with your workspace.
+
+---
+
+## Key Features
+
+- **True Autonomous Agent**: Talks, codes, and executes tasks directly within your project workspace.
+- **Code-First Architecture**: Built natively to focus on generating file changes (`changes[]`) and executing system actions (`commands[]`).
+- **Comprehensive TUI**: A rich terminal UI featuring an active mission board, real-time status updates, and streaming model output.
+- **Granular Access Control**: Flexible session-level policy (`full` or `selective` workspace access) to keep your project secure.
+- **Multi-Provider Support**: Seamlessly switch between top-tier AI models from **OpenAI**, **Anthropic**, **Gemini**, **DeepSeek**, **Hugging Face**, or run entirely locally via **Ollama**.
+- **Model Context Protocol (MCP)**: Out-of-the-box support for the MCP ecosystem, enabling rich external tool integrations.
+- **Advanced Autonomous Tooling**: Includes built-in web search, deep project indexing, and a powerful "Mission Mode" for multi-step, sustained task execution.
+- **Standalone Binary**: Deploy as a native standalone `.exe` for zero-dependency execution in any environment.
+
+---
+
+## Installation & Prerequisites
+
 ### Prerequisites
-- Node.js 20+
-- npm
-- Windows recommended for `.exe` compile (`npm run compile`)
+- Node.js (Version 20+)
+- npm (Node Package Manager)
+- *(Optional)* Windows environment for compiling native binaries.
 
-### Install
-```bash
-git clone github.com/Sage563/Agent-ClI.git
-cd Agent-ClI
-npm install
-```
+### Quick Start
 
-## Model Setup
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Sage563/Agent-CLI.git
+   cd Agent-CLI
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Launch the CLI:**
+   ```bash
+   npm run dev
+   ```
+
+---
+
+## Model Configuration
+
+Agent CLI handles both local and cloud-based providers with native support for specialized reasoning models.
+
 ### Local Models (Ollama)
-1. Install Ollama.
-2. Pull a model:
+
+1. **Install [Ollama](https://ollama.com/)**.
+2. **Pull and configure your model:**
+   ```bash
+   /provider ollama
+   /config endpoint http://localhost:11434
+   /model qwen3:14b
+   ```
+
+### Cloud Providers (`openai`, `anthropic`, `gemini`, `deepseek`)
+
+1. **Select provider and model:**
+   ```bash
+   /provider anthropic
+   /model claude-3-5-sonnet-20241022
+   ```
+2. **Configure API Key:**
+   ```bash
+   /config anthropic_api_key your-api-key-here
+   ```
+
+### Hugging Face (Inference API)
+
+Agent CLI can interface with thousands of models on Hugging Face using their standard Inference API.
+
+1. **Set your API Token:**
+   ```bash
+   /provider hf
+   /config hf_api_key your-token-here
+   ```
+2. **Choose a model ID or custom Endpoint:**
+   ```bash
+   /model meta-llama/Llama-2-7b-chat-hf
+   # OR use a custom inference endpoint
+   /config endpoint https://your-custom-endpoint.huggingface.co
+   ```
+
+---
+
+## Usage Guide
+
+### Starting the Agent
+
+To start the interactive Terminal UI, run:
 ```bash
-ollama pull qwen3:14b
-```
-3. In Agent CLI:
-```bash
-/provider ollama
-/config endpoint http://localhost:11434
-/model qwen3:14b
+npm run dev
 ```
 
-### Remote API Models
-Pick a provider and set model:
-```bash
-/provider openai
-/model gpt-4o
-```
-Supported providers: `openai`, `anthropic`, `gemini`, `deepseek`.
+### Core Commands
 
-## API Key Setup
-### Option A: CLI Config Commands
+Inside the Agent CLI environment, you can use these core slash-commands:
+
 ```bash
-/config openai_api_key <key>
-/config anthropic_api_key <key>
-/config gemini_api_key <key>
-/config deepseek_api_key <key>
+/help                   # View all available commands
+/config                 # View and modify current configuration
+/config -h              # View configuration options help
+/access prompt          # Request/reset file access permissions
+/list_diff 20           # View recent file diffs
+/timeout unlimited      # Adjust task timeout limits
+/search <query>         # Perform Web searches natively
+/status                 # Run a diagnostic check on providers
+/logs 20                # Tail the underlying command logs
 ```
 
-### Option B: `.env` Bootstrap (Bridge to runtime config)
-Create `.env` in repo root (see `docs/.env.example`):
+### Transparent reasoning
+
+Agent CLI makes the AI's "thought stream" visible in real-time. You can monitor the agent's strategy through dedicated live headers:
+- `----AGENT THINKING--------`: Raw reasoning and logic steps.
+- `----AGENT PLAN--------`: The multi-step execution strategy.
+- `— AI RESPONSE —`: The final conversational output.
+
+### Execution Directives
+
+- **Inline Shell Execution**: Prefix any terminal command with `!` to run it directly:
+  ```bash
+  !git status
+  ```
+- **Contextual File References**: Simply mention files in your natural language prompt and the agent will detect and read them:
+  ```text
+  Please fix the error handling in src/core/agent.ts
+  ```
+
+---
+
+## Configuration & Environment
+
+Configuration is stored securely in your user application data directory (`%APPDATA%/agent-cli` on Windows).
+
+### Environment Variables Bootstrap
+
+To avoid typing keys manually, setup an `.env` file in the root directory. This data bridges into the application's secure configuration at startup (if `env_bridge_enabled=true`).
+
+*Copy the example template (`docs/.env.example`) to `.env` and fill it in:*
 ```env
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-GEMINI_API_KEY=...
-DEEPSEEK_API_KEY=...
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GEMINI_API_KEY=your_gemini_key
+DEEPSEEK_API_KEY=your_deepseek_key
+HUGGINGFACE_API_KEY=your_huggingface_key
 OLLAMA_ENDPOINT=http://localhost:11434
 ```
-On startup, if `env_bridge_enabled=true`, values are synced into app config/secrets.
 
-## Usage
-Start:
-```bash
-npm run dev
-```
+### Key Configuration Options
 
-Core examples:
-```bash
-/help
-/config
-/access prompt
-/list_diff 20
-/timeout unlimited
-/mcp status
-/search latest typescript release notes
-/logs 20
-```
+You can modify behavior via the `/config` command:
+- `run_policy`: Set auto-execution behavior (`ask` | `always` | `never`).
+- `stream` / `stream_print`: Toggle AI output streaming.
+- `command_timeout_ms`: Maximum execution time for shell commands (`0` for unlimited).
+- `max_budget`: Limit token spending/budget.
 
-Inline shell:
-```bash
-!git status
-```
+---
 
-Attach files:
-```text
-Fix this bug in @src/core/agent.ts
-```
+## Model Context Protocol (MCP)
 
-## Configuration
-App config is stored in user app-data (`%APPDATA%/agent-cli` on Windows).
+Agent CLI provides deep integration with the **Model Context Protocol (MCP)**, allowing your AI to query external databases, interact with GitHub, fetch weather, and more.
 
-Useful keys:
-- `run_policy`: `ask | always | never`
-- `stream`, `stream_print`
-- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`
-- `command_timeout_ms` (`0` means unlimited), `command_log_enabled`
-- `env_bridge_enabled`
-- `max_budget`
-
-See:
-```bash
-/config -h
-```
-
-### Model Context Protocol (MCP)
-Agent CLI supports MCP out of the box. For a full guide on configuring and using MCP servers, see [docs/mcp.md](docs/mcp.md).
-
-Quick commands:
+**Quick Commands:**
 ```bash
 /mcp enable             # Turn on MCP integration
-/mcp status             # Check status and server count
+/mcp status             # View active MCP servers
 /mcp list               # List all configured servers
-/mcp add <name> <cmd>   # Add a new MCP server
-/mcp tools              # List available tools
-/mcp inspect <server>   # Inspect tools, prompts, resources
+/mcp add <name> <cmd>   # Add a new tool server
+/mcp tools              # See available external tools
 ```
 
-Example config: `docs/config.example.json`
+*For a comprehensive guide, see the [MCP Documentation](docs/mcp.md).*
 
-## Development
-### Development mode
+---
+
+## Development & Deployment
+
+### Development Mode
+
+Run the continuous development build:
 ```bash
 npm run dev
 ```
 
-### Test
+### Code Quality
+
+Ensure your commits pass standard checks:
 ```bash
+npm run lint
 npm run test
 ```
 
-### Lint
-```bash
-npm run lint
-```
+### Production Builds
 
-### Production build (Node dist)
+**Standard Node Build:**
 ```bash
 npm run build
 npm run start
 ```
 
-### Production build (Windows EXE)
+**Standalone Windows Executable (.exe):**
 ```bash
 npm run compile
 .\release\agent_cli.exe
 ```
 
-### Docker
+**Docker Container:**
 ```bash
 docker build -t agent-cli:latest .
 docker run --rm -it agent-cli:latest
 ```
 
-## Architecture Overview
-High-level module map:
-- `src/core`: agent loop, permissions, tools, events, command runner, session access.
-- `src/providers`: model adapters for each provider.
-- `src/ui`: terminal panels, mission board, session GUI, workspace layout.
-- `src/commands`: slash-command registry and handlers.
-- `src/task_builder.ts`: request payload assembly and context gathering.
-- `src/applier.ts`: transactional file change apply/rollback.
+---
 
-Detailed architecture: `docs/architecture.md`
+## Architecture
+
+Agent CLI is designed with a robust, modular architecture:
+
+- `src/core`: The heart of the application—handles the agent loop, access permissions, telemetry, the command runner, and event buses.
+- `src/providers`: Clean adapter abstractions for LLM providers.
+- `src/ui`: The layout engine, mission board, and rendering logic for the TUI.
+- `src/commands`: The registry and handlers for all interactive slash-commands.
+- `src/applier.ts`: A transactional file change manager with automatic rollback capabilities.
+
+*For a detailed breakdown, see the [Architecture Overview](docs/architecture.md).*
+
+---
 
 ## Troubleshooting
-See `docs/troubleshooting.md` for common issues:
-- provider/API key validation failures
-- streaming timeout/fallback behavior
-- permission/access prompts
-- command timeout failures
-- CI lint/test/build failures
+
+Encountering issues? See the [Troubleshooting Guide](docs/troubleshooting.md) for solutions to common problems, including:
+- API Key Validation Failures
+- Streaming Stalls & UI Freezes
+- File Access Denied Errors
+- Command Execution Timeouts
+
+---
 
 ## Contributing
-1. Create a branch.
-2. Implement changes with tests.
-3. Run:
-```bash
-npm run lint
-npm run test
-npm run build
-```
-4. Open a PR with behavior summary and validation notes.
+
+We welcome community contributions!
+
+1. Fork and create a feature branch.
+2. Implement your changes.
+3. Validate your code:
+   ```bash
+   npm run lint && npm run test && npm run build
+   ```
+4. Open a Pull Request detailing the changes, behaviors, and testing steps.

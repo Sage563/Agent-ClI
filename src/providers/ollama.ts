@@ -49,7 +49,7 @@ export class OllamaProvider extends Provider {
     }
     if (includeHistory || !cachedContext.length) {
       for (const msg of history) {
-        messages.push({ role: msg.role, content: msg.content });
+        messages.push({ role: msg.role, content: this.flattenContent(msg.content) });
       }
     }
     const taskJson = JSON.stringify(taskClone);
@@ -112,25 +112,61 @@ export class OllamaProvider extends Provider {
     if (streamEnabled && response.data) {
       const stream = response.data as NodeJS.ReadableStream;
       let buffered = "";
+      let startedThinking = false;
+      let endedThinking = false;
+
       await new Promise<void>((resolve, reject) => {
         const processLine = (line: string) => {
           const trimmed = line.trim();
           if (!trimmed) return;
           const parsed = JSON.parse(trimmed) as any;
-          const chunk = parsed?.message?.content || "";
+          const chunk = parsed?.message?.content || parsed?.response || "";
+
+          let chunkThinking = "";
+          if (parsed?.message && "thinking" in parsed.message) {
+            chunkThinking = parsed.message.thinking || "";
+          } else if (parsed && "thinking" in parsed) {
+            chunkThinking = parsed.thinking || "";
+          }
+
+          if (chunkThinking) {
+            if (!startedThinking) {
+              startedThinking = true;
+              const openPattern = "<think>\n";
+              fullContent += openPattern;
+              if (opts?.streamCallback) opts.streamCallback(openPattern);
+            }
+            fullContent += chunkThinking;
+            if (opts?.streamCallback) opts.streamCallback(chunkThinking);
+          }
+
+          if (startedThinking && !endedThinking && chunk) {
+            endedThinking = true;
+            const closePattern = "\n</think>\n";
+            fullContent += closePattern;
+            if (opts?.streamCallback) opts.streamCallback(closePattern);
+          }
+
           if (chunk) {
             fullContent += chunk;
             if (opts?.streamCallback) opts.streamCallback(chunk);
           }
+          if (Array.isArray(parsed?.context) && parsed.context.length > 0) {
+            responseContext = parsed.context
+              .map((x: unknown) => Number(x))
+              .filter((x: number) => Number.isFinite(x) && x >= 0)
+              .map((x: number) => Math.floor(x));
+          }
+
           if (parsed?.done) {
+            if (startedThinking && !endedThinking) {
+              endedThinking = true;
+              const closePattern = "\n</think>\n";
+              fullContent += closePattern;
+              if (opts?.streamCallback) opts.streamCallback(closePattern);
+            }
             usage.input_tokens = parsed?.prompt_eval_count || 0;
             usage.output_tokens = parsed?.eval_count || 0;
-            if (Array.isArray(parsed?.context)) {
-              responseContext = parsed.context
-                .map((x: unknown) => Number(x))
-                .filter((x: number) => Number.isFinite(x) && x >= 0)
-                .map((x: number) => Math.floor(x));
-            }
           }
         };
 
@@ -152,7 +188,20 @@ export class OllamaProvider extends Provider {
       });
     } else {
       const parsed = response.data as any;
-      fullContent = String(parsed?.message?.content || "");
+      const chunk = String(parsed?.message?.content || parsed?.response || "");
+      let chunkThinking = "";
+      if (parsed?.message && "thinking" in parsed.message) {
+        chunkThinking = String(parsed.message.thinking || "");
+      } else if (parsed && "thinking" in parsed) {
+        chunkThinking = String(parsed.thinking || "");
+      }
+
+      if (chunkThinking) {
+        fullContent = `<think>\n${chunkThinking}\n</think>\n${chunk}`;
+      } else {
+        fullContent = chunk;
+      }
+
       usage.input_tokens = parsed?.prompt_eval_count || 0;
       usage.output_tokens = parsed?.eval_count || 0;
       if (Array.isArray(parsed?.context)) {

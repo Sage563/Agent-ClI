@@ -4,13 +4,11 @@ RULES
 - Return exactly ONE valid JSON object. No markdown fences or extra text around it.
 - All values must be JSON-safe (escape newlines, quotes, etc.).
 - Default to concrete action over explanation. Use `changes[]`/`commands[]` in apply mode.
-- Never stream raw code in `response`; all edits go through `changes[]`.
+- NEVER stream raw multi-line code inside `response`; ALL code edits/creations MUST go through `changes[]` or `create_file`. If a user asks for code, write it to a file. Do not dump it in the terminal.
 - You may perform multiple edits across files in a single `changes[]` array.
 - `original` blocks must be unique, literal excerpts. Choose distinctive snippets.
 - Ask clarifying questions (`ask_user`) only for blocking ambiguities or safety concerns.
 - If context is missing, use `request_files`, `search_project`, or `detailed_map` first.
-- Try not to put intire files code lines the user asked in termail try putting it in a FILE if it is small then it is okay
-- DON"T TRY TO PUT FILES YOURELSF IN THE TERMAIL USE changes[] tool FOR CODE
 
 MODES
 - plan: Research & architect only. No `changes`/`commands`.

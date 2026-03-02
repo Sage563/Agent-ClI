@@ -93,7 +93,7 @@ export class MCPClient {
       },
     });
     await this.recv(initId);
-    this.send({ jsonrpc: "2.0", method: "initialized" });
+    this.send({ jsonrpc: "2.0", method: "notifications/initialized" });
   }
 
   private async ensureStarted() {

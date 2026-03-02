@@ -5,7 +5,7 @@ import readline from "readline";
 import chalk from "chalk";
 import logUpdate from "log-update";
 import { cfg } from "./config";
-import { reloadTheme, console, printPanel, THEME } from "./ui/console";
+import { reloadTheme, console, printPanel, THEME, resetScrollRegion } from "./ui/console";
 import { APP_ONBOARDING_ART } from "./app_dirs";
 import { BUILTIN_PROVIDERS, getProviderLabel } from "./providers/catalog";
 
@@ -49,6 +49,7 @@ const PROVIDER_TOKEN_MAX: Record<string, number> = {
   anthropic: 8192,
   gemini: 1048576,
   deepseek: 64000,
+  hf: 32768,
 };
 
 function buildTokenChoices(provider: string): TokenChoice[] {
@@ -293,7 +294,7 @@ function renderScreen(params: {
   const selectedBg = resolved === "dark" ? chalk.bgCyan.black : chalk.bgBlue.white;
 
   const art = treeArt(mode, frame);
-  const cols = Math.max(60, process.stdout.columns || 120);
+  const cols = Math.max(60, Math.min(100, process.stdout.columns || 120));
   const rows = Math.max(18, process.stdout.rows || 32);
   const contentRows = Math.max(10, rows - 2);
   const inner = Math.max(40, cols - 4);
@@ -394,6 +395,7 @@ async function selectWithArrows(params: {
       : null;
 
     const cleanup = () => {
+      resetScrollRegion();
       if (timer) clearInterval(timer);
       stdin.setRawMode?.(false);
       stdin.removeListener("keypress", onKeypress);
@@ -488,10 +490,14 @@ async function configureProvider(provider: string, mode: ThemeMode, alwaysAsk = 
     cfg.setEndpoint(provider, endpoint || defaultEndpoint);
   }
 
-  const modelLabel = provider === "ollama" ? "Ollama model" : `Optional model for ${providerLabel}`;
-  const model = (await console.input(`${modelLabel} [${defaultModel}]: `)).trim();
-  if (model || provider === "ollama") {
-    cfg.setModel(provider, model || defaultModel);
+  const hfDefaultModel = "microsoft/Phi-3-mini-4k-instruct";
+  const hfModelHint = provider === "hf"
+    ? ` (e.g. microsoft/Phi-3-mini-4k-instruct, Qwen/Qwen2.5-72B-Instruct)`
+    : "";
+  const modelLabel = provider === "ollama" ? "Ollama model" : `Optional model for ${providerLabel}${hfModelHint}`;
+  const model = (await console.input(`${modelLabel} [${defaultModel || (provider === "hf" ? hfDefaultModel : "")}]: `)).trim();
+  if (model || provider === "ollama" || provider === "hf") {
+    cfg.setModel(provider, model || (provider === "hf" ? hfDefaultModel : defaultModel));
   }
 
   const tokenKey = provider === "ollama" ? "num_ctx" : provider === "gemini" ? "max_output_tokens" : "max_tokens";
@@ -517,7 +523,7 @@ async function configureProvider(provider: string, mode: ThemeMode, alwaysAsk = 
     options: tokenChoices.map((x) => ({ label: x.label, description: x.description })),
     initialIndex: initialIndex >= 0 ? initialIndex : 0,
     animate: true,
-    stepLabel: "Provider Setup",
+    stepLabel: "Step 4 of 4",
   });
   const picked = tokenChoices[selectedIndex] || tokenChoices[tokenChoices.length - 1];
   if (picked.value === null) {
@@ -565,7 +571,7 @@ export async function runFirstLaunchOnboarding() {
     options: THEME_OPTIONS.map((o) => ({ label: o.label, description: o.description })),
     initialIndex: 0,
     animate: true,
-    stepLabel: "Step 1 of 5",
+    stepLabel: "Step 1 of 4",
     hint: fs.existsSync(APP_ONBOARDING_ART()) ? "Live art: edit onboarding.art.json while this picker is open." : undefined,
   });
 
@@ -592,7 +598,7 @@ export async function runFirstLaunchOnboarding() {
     options: accessOptions.map((o) => ({ label: o.label, description: o.description })),
     initialIndex: 0,
     animate: true,
-    stepLabel: "Step 2 of 5",
+    stepLabel: "Step 2 of 4",
   });
   const scope = accessOptions[accessIdx]?.value || "limited";
   applyAccessScope(scope);
@@ -612,7 +618,7 @@ export async function runFirstLaunchOnboarding() {
     options: providerOptions,
     initialIndex: providerInitial,
     animate: true,
-    stepLabel: "Step 3 of 5",
+    stepLabel: "Step 3 of 4",
   });
 
   const pickedProvider = normalizedProviders[providerIdx] || "ollama";

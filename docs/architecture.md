@@ -1,52 +1,72 @@
 # Architecture Overview
 
-## Runtime Flow
-1. `src/index.ts` bootstraps process warnings + launches `runMain()`.
-2. `src/main.ts` loads runtime assets, onboarding, provider/model state, and input loop.
-3. `src/core/agent.ts` is the execution engine:
-   - builds task payload (`task_builder`)
-   - calls provider adapter
-   - parses structured JSON response
-   - runs tools/search
-   - applies file changes
-   - executes commands
-4. `src/ui/*` renders terminal UI state (panels, mission board, workspace layout).
+The Agent CLI is structured around a central orchestration engine, provider adapters, and a reactive terminal user interface.
 
-## Core Modules
-- `src/core/agent.ts`: central task lifecycle orchestration.
-- `src/core/events.ts`: typed execution event bus.
-- `src/core/session_access.ts`: session-level file access policy (`full` or `selective`).
-- `src/core/command_runner.ts`: safe command execution with timeout/logging.
-- `src/core/streaming.ts`: stream observer, throttled rendering, retry/fallback.
-- `src/core/tools.ts`: web search/browse, project search, lint/index hooks.
+## 🔄 Runtime Flow
 
-## Providers
-`src/providers/*` contains adapter implementations for:
-- Ollama (local)
-- OpenAI
-- Anthropic
-- Gemini
-- DeepSeek
+The application execution lifecycle follows these primary steps:
 
-Each provider implements `Provider.call()` + `Provider.validate()`.
+1. **Bootstrap (`src/index.ts`)**: Initializes the process, handles top-level warnings, and launches `runMain()`.
+2. **Setup (`src/main.ts`)**: Loads runtime assets, user onboarding data, provider/model states, and starts the core input loop.
+3. **Execution Engine (`src/core/agent.ts`)**: The heart of the application. It:
+   - Compiles the system state into a prompt payload via `task_builder.ts`.
+   - Sends requests to the configured provider API.
+   - Parses the structured JSON responses.
+   - Autonomously executes built-in tools (search, read, etc.).
+   - Applies filesystem changes transactionally.
+   - Executes terminal commands safely.
+4. **Presentation (`src/ui/*`)**: Renders the terminal UI, updating the active mission board, status panels, and workspace layouts in real-time.
 
-## Commands
-`src/commands/*` registers slash commands through `registry.ts`.
-Notable:
-- `/config`, `/provider`, `/model`
-- `/access`, `/logs`, `/search`
-- `/mission`, `/plan`, `/fast`
-- `/mcp` for MCP integration
+---
 
-## File Editing
-- Model returns `changes[]` items.
-- `src/applier.ts` applies transactional replacements with rollback on failure.
-- Diffs shown through `src/ui/agent_ui.ts`.
+## 🧩 Core Modules
 
-## Session and Storage
-Stored under app data directory (`%APPDATA%/agent-cli` on Windows):
-- `agent.config.json`
-- `.secrets.json`
-- `sessions/*.json`
-- `logs/commands-YYYY-MM-DD.ndjson`
+- **`src/core/agent.ts`**: Orchestrates the central task lifecycle.
+- **`src/core/events.ts`**: A robust, strongly-typed event bus for execution state broadcasting.
+- **`src/core/session_access.ts`**: Manages session-level file access security policies (`full` vs `selective`).
+- **`src/core/command_runner.ts`**: Provides safe local command execution, featuring strict timeouts and comprehensive output logging.
+- **`src/core/streaming.ts`**: Handles LLM output streams, providing throttled UI rendering, retry logic, and fallback mechanisms.
+- **`src/core/tools.ts`**: Implements built-in autonomous functions like web search, project indexing, and code linting.
+- **`src/applier.ts`**: Applies code modifications safely, backing up files temporarily to ensure reliable rollbacks on failure.
+- **`src/task_builder.ts`**: Assembles the LLM context payload, gathering system info, history, and tool schemas.
 
+---
+
+## 📡 Provider Adapters
+
+The system interfaces with Large Language Models through unified provider adapters located in `src/providers/*`:
+
+- **Ollama** (Local inference)
+- **OpenAI**
+- **Anthropic**
+- **Gemini**
+- **DeepSeek**
+- **Hugging Face**
+
+Every provider implements the core `Provider` interface, exposing a standardized `call()` method for generation and a `validate()` method for startup diagnostics.
+
+---
+
+## ⌨️ Command Registry
+
+Slash commands are managed in `src/commands/*` and registered centrally via `registry.ts`.
+Key categories include:
+
+- **Configuration**: `/config`, `/provider`, `/model`
+- **Security & Inspection**: `/access`, `/logs`, `/status`
+- **Workflows**: `/mission`, `/plan`, `/fast`
+- **Integrations**: `/mcp`, `/search`
+
+---
+
+## 💾 Session & Storage Hierarchy
+
+All user configuration, secrets, and historical session logs are stored securely in the local application data directory.
+
+**Path on Windows:** `%APPDATA%/agent-cli`
+
+### Directory Structure
+- `agent.config.json`: The primary configuration settings.
+- `.secrets.json`: Secure storage for API keys.
+- `sessions/*.json`: Serialized state of past and active conversational sessions.
+- `logs/commands-YYYY-MM-DD.ndjson`: Detailed, structured logs of all executed terminal commands and their outputs.

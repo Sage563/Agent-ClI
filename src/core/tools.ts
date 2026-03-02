@@ -89,7 +89,7 @@ export async function webSearchStructured(queries: string[] | string, searchType
   const tasks = list.map(async (query) => {
     try {
       const results = searchType === "news" ? await searchNews(query) : await search(query, { safeSearch: 0 });
-      const items = (results as any).results || [];
+      const items = Array.isArray(results) ? results : ((results as any).results || []);
       if (!items.length) {
         out[query] = [];
         return;
@@ -179,11 +179,12 @@ export function gitDiff(staged = false) {
   return rg.stdout || "No differences found.";
 }
 
-export function createFile(filePath: string, content: string = "") {
+export function createFile(filePath: string, content: string | object = "") {
   const full = path.resolve(process.cwd(), filePath);
   if (fs.existsSync(full)) return `Error: File already exists at ${filePath}`;
   fs.ensureDirSync(path.dirname(full));
-  fs.writeFileSync(full, content, "utf8");
+  const textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  fs.writeFileSync(full, textContent, "utf8");
   return `Successfully created ${filePath}`;
 }
 

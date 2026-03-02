@@ -108,7 +108,7 @@ function renderPicker(params: {
   maxPreviewLines: number;
 }) {
   const { query, files, selected, highlighted, preview, maxPreviewLines } = params;
-  const cols = Math.max(80, process.stdout.columns || 120);
+  const cols = Math.max(80, Math.min(100, process.stdout.columns || 120));
   const rows = Math.max(20, process.stdout.rows || 30);
   const leftWidth = Math.max(34, Math.floor(cols * 0.52));
   const rightWidth = Math.max(26, cols - leftWidth - 3);
