@@ -16,3 +16,9 @@ export function calculateCost(modelName: string, inputTokens: number, outputToke
   const [inputPrice, outputPrice] = PRICING[key];
   return (inputTokens / 1_000_000) * inputPrice + (outputTokens / 1_000_000) * outputPrice;
 }
+
+export function formatCost(cost: number) {
+  if (cost === 0) return "$0.00";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+}

@@ -5,16 +5,16 @@ import { appDataDir } from "../app_dirs";
 import { registry } from "./registry";
 
 
-registry.register("/uninstall", "Completely remove all Agent CLI data and session history.", ["/purge"])(async () => {
+registry.register("/uninstall", "Completely remove all Agent CLi data and session history.", ["/purge"])(async () => {
     console.print("\n[WARNING] This will delete ALL configured providers, api keys, and session memories.");
-    const answer = await console.input("Are you sure you want to completely wipe all Agent CLI data? (yes/no): ");
+    const answer = await console.input("Are you sure you want to completely wipe all Agent CLi data? (yes/no): ");
 
     if (answer.trim().toLowerCase() === "yes") {
         const targetDir = appDataDir();
         try {
             if (fs.existsSync(targetDir)) {
                 fs.rmSync(targetDir, { recursive: true, force: true });
-                console.print("\n[SUCCESS] Successfully removed all Agent CLI configuration data from: " + targetDir);
+                console.print("\n[SUCCESS] Successfully removed all Agent CLi configuration data from: " + targetDir);
                 console.print("You may now freely delete the `agent_cli.exe` binary to complete the uninstallation.");
                 process.exit(0);
             } else {

@@ -89,7 +89,7 @@ export class MCPClient {
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "Agent CLI", version: "1.0" },
+        clientInfo: { name: "Agent CLi", version: "1.0" },
       },
     });
     await this.recv(initId);

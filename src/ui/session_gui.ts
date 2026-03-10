@@ -6,7 +6,7 @@ import readline from "readline";
 import { APP_ONBOARDING_ART } from "../app_dirs";
 import { cfg } from "../config";
 import { clear, deleteSession, getActiveSessionName, listSessions, readSession, setActiveSessionName } from "../memory";
-import { console, printSuccess, printWarning, resetScrollRegion } from "./console";
+import { console, fit, printSuccess, printWarning, resetScrollRegion } from "./console";
 
 type SessionSummary = {
   name: string;
@@ -31,11 +31,7 @@ function padAnsi(text: string, width: number) {
 }
 
 function fitAnsi(text: string, width: number) {
-  if (width <= 0) return "";
-  if (visibleLength(text) <= width) return padAnsi(text, width);
-  const plain = text.replace(ANSI_RE, "");
-  if (width <= 1) return plain.slice(0, width);
-  return `${plain.slice(0, width - 1)}...`;
+  return fit(text, width);
 }
 
 function wrapPlain(text: string, width: number) {

@@ -6,8 +6,8 @@ import { BUILTIN_PROVIDERS } from "../providers/catalog";
 const GENERATION_KEYS = new Set(["temperature", "max_tokens", "max_output_tokens", "num_ctx", "top_p", "top_k", "num_predict", "repeat_penalty"]);
 const STREAM_KEYS = new Set(["stream", "stream_print"]);
 const GLOBAL_STREAM_KEYS = new Set(["stream_global", "stream_print_global"]);
-const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "mission_render_fps", "command_timeout_ms"]);
-const BOOLEAN_RUNTIME_KEYS = new Set(["command_log_enabled", "env_bridge_enabled", "strict_edit_requires_full_access"]);
+const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "mission_render_fps", "command_timeout_ms", "max_requests"]);
+const BOOLEAN_RUNTIME_KEYS = new Set(["command_log_enabled", "env_bridge_enabled", "strict_edit_requires_full_access", "disable_timeout_retry", "image_to_ascii"]);
 const THEME_KEYS = new Set(["primary", "secondary", "accent", "success", "warning", "error", "dim", "bg"]);
 const VALID_PROVIDERS: string[] = [...BUILTIN_PROVIDERS];
 const CONFIG_HELP_FLAGS = new Set(["-h", "--help", "help"]);
@@ -18,27 +18,45 @@ function mask(key?: string) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function printConfigHelp() {
+function parseBooleanValue(raw: string) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (["true", "1", "on", "enable", "enabled", "yes"].includes(v)) return true;
+  if (["false", "0", "off", "disable", "disabled", "no"].includes(v)) return false;
+  return null;
+}
+
+export function printConfigHelp() {
   let text = "## Usage\n";
   text += "- `/config`: Show current configuration snapshot\n";
   text += "- `/config -h`: Show this help\n";
   text += "- `/config <key>`: Show current value for a key\n";
   text += "- `/config <key> <value>`: Set key value\n";
-  text += "\n## Providers\n";
+  text += "\n## Providers and Models\n";
   text += `- Valid providers: ${VALID_PROVIDERS.join(", ")}\n`;
   text += "- API keys: `<provider>_api_key` (example: `openai_api_key`)\n";
   text += "- Active provider: `/provider <name>`\n";
+  text += "- Set active model for active provider: `/model <model_name>`\n";
+  text += "\n### Example Models you can set per provider:\n";
+  text += "- **openai**: `gpt-4o`, `o1-preview`, `gpt-4-turbo`\n";
+  text += "- **anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`, `claude-3-haiku-20240307`\n";
+  text += "- **gemini**: `gemini-2.5-flash`, `gemini-2.0-pro-exp-02-05`\n";
+  text += "- **ollama**: `qwen3:14b`, `llama3.3:70b`, `deepseek-r1:14b`\n";
+  text += "- **deepseek**: `deepseek-chat`, `deepseek-coder`\n";
+  text += "- **hf**: `Qwen/Qwen2.5-72B-Instruct`, `microsoft/Phi-3-mini-4k-instruct`\n";
   text += "\n## Core Keys\n";
   text += "- `endpoint`\n";
   text += "- `run_policy` (`ask`, `always`, `never`)\n";
   text += "- `budget` (number)\n";
+  text += "- `max_requests` (number, `0` = unlimited)\n";
   text += "- `effort` (`low`, `medium`, `high`)\n";
   text += "- `reasoning` (`low`, `standard`, `high`, `extra`)\n";
   text += "- `mcp_enabled` (`true`/`false`)\n";
   text += "- `env_bridge_enabled` (`true`/`false`)\n";
   text += "- `command_log_enabled` (`true`/`false`)\n";
   text += "- `strict_edit_requires_full_access` (`true`/`false`)\n";
-  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `mission_render_fps`, `command_timeout_ms` (set `0` for unlimited)\n";
+  text += "- `disable_timeout_retry` (`true`/`false`)\n";
+  text += "- `image_to_ascii` (`true`/`false`)\n";
+  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `mission_render_fps`, `command_timeout_ms` (`stream_timeout_ms=false` disables stream timeout)\n";
   text += "\n## Generation Keys (number)\n";
   text += `- ${Array.from(GENERATION_KEYS).join(", ")}\n`;
   text += "\n## Stream Keys\n";
@@ -51,11 +69,15 @@ function printConfigHelp() {
   text += "- `ollama_num_ctx`\n";
   text += "\n## Examples\n";
   text += "- `/config run_policy always`\n";
+  text += "- `/config max_requests 20`\n";
   text += "- `/config budget 20`\n";
   text += "- `/config temperature 0.2`\n";
+  text += "- `/config stream_timeout_ms false`\n";
   text += "- `/config theme.primary cyan`\n";
   text += "- `/config stream true`\n";
   text += "- `/config stream_global false`\n";
+  text += "- `/model claude-3-5-sonnet-20241022`\n";
+  text += "- `/provider openai`\n";
   printPanel(text, "Config Help");
 }
 
@@ -91,6 +113,7 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
     text += `- mission_mode: ${cfg.isMissionMode()}\n`;
     text += `- voice_mode: ${cfg.isVoiceMode()}\n`;
     text += `- max_budget: $${cfg.getBudget().toFixed(2)}\n`;
+    text += `- max_requests: ${String(cfg.get("max_requests", 0))}\n`;
     printPanel(text, "Config");
     return true;
   }
@@ -184,13 +207,22 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
   }
 
   if (NUMERIC_RUNTIME_KEYS.has(key)) {
+    if (key === "stream_timeout_ms") {
+      const boolLike = parseBooleanValue(value);
+      if (boolLike === false) {
+        cfg.set(key, false);
+        printSuccess("Set stream_timeout_ms = false (disabled).");
+        return true;
+      }
+    }
     const parsed = Number(value);
     if (Number.isNaN(parsed)) {
       printError(`${key} must be a number`);
       return true;
     }
-    cfg.set(key, parsed);
-    printSuccess(`Set ${key} = ${parsed}`);
+    const normalized = key === "max_requests" ? Math.max(0, Math.floor(parsed)) : parsed;
+    cfg.set(key, normalized);
+    printSuccess(`Set ${key} = ${normalized}`);
     return true;
   }
 
@@ -294,7 +326,7 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
 
   printWarning(`Unknown config key: ${key}`);
   printInfo(
-    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, mission_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
+    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, disable_timeout_retry, stream_render_fps, mission_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
   );
   printInfo("Run `/config -h` to see full config help.");
   return true;

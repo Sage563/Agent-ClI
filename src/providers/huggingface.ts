@@ -2,8 +2,8 @@ import OpenAI from "openai";
 import axios from "axios";
 import { cfg } from "../config";
 import type { TaskPayload, MessageContent } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult, ProviderConfig } from "./base";
+import { ResilientProvider } from "./base";
 
 const HF_CHAT_ENDPOINT = "https://router.huggingface.co/v1";
 const HF_LEGACY_ENDPOINT_BASE = "https://router.huggingface.co/models";
@@ -50,7 +50,11 @@ function sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export class HuggingFaceProvider extends Provider {
+export class HuggingFaceProvider extends ResilientProvider {
+    constructor() {
+        super({ name: "hf", timeout: 30000, maxRetries: 3 });
+    }
+
     private buildMessages(system: string, task: TaskPayload): any[] {
         const messages: any[] = [];
         if (system) messages.push({ role: "system", content: system });
@@ -92,7 +96,7 @@ export class HuggingFaceProvider extends Provider {
         return messages;
     }
 
-    async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+    protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
         const apiKey = cfg.getApiKey("hf");
         if (!apiKey) throw new Error("Hugging Face API key not found. Use '/config hf_api_key <key>'.");
 
@@ -235,7 +239,7 @@ export class HuggingFaceProvider extends Provider {
         return err;
     }
 
-    async validate(): Promise<{ ok: boolean; message: string }> {
+    protected async executeValidation(): Promise<{ ok: boolean; message: string }> {
         const apiKey = cfg.getApiKey("hf");
         if (!apiKey) return { ok: false, message: "Hugging Face API key not set. Use '/config hf_api_key <key>'." };
         try {

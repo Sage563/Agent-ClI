@@ -1,8 +1,8 @@
 import axios from "axios";
 import { cfg } from "../config";
 import type { TaskPayload } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult} from "./base";
+import { ResilientProvider } from "./base";
 
 function splitThinking(fullContent: string) {
   if (fullContent.includes("<think>") && fullContent.includes("</think>")) {
@@ -22,8 +22,47 @@ function normalizeEndpoint(raw: string) {
   return withProtocol.replace(/\/+$/, "");
 }
 
-export class OllamaProvider extends Provider {
-  async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+function summarizeOllamaErrorBody(data: unknown) {
+  if (!data) return "";
+  if (typeof data === "string") return data.trim();
+  if (typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    const msg = String(obj.error || obj.message || "").trim();
+    if (msg) return msg;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return "";
+    }
+  }
+  return String(data);
+}
+
+function extractThinkingLike(parsed: any) {
+  const message = parsed?.message;
+  const fromMessage = String(
+    message?.thinking ??
+    message?.thought ??
+    message?.reasoning ??
+    message?.reasoning_content ??
+    "",
+  );
+  if (fromMessage.trim()) return fromMessage;
+  return String(
+    parsed?.thinking ??
+    parsed?.thought ??
+    parsed?.reasoning ??
+    parsed?.reasoning_content ??
+    "",
+  );
+}
+
+export class OllamaProvider extends ResilientProvider {
+  constructor() {
+    super({ name: "ollama", timeout: 30000, maxRetries: 3 });
+  }
+
+  protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const providerConfig = cfg.getProviderConfig("ollama");
     const endpoint = normalizeEndpoint(String(providerConfig.endpoint || "http://localhost:11434"));
     const url = `${endpoint}/api/chat`;
@@ -73,24 +112,29 @@ export class OllamaProvider extends Provider {
 
     const streamEnabled =
       typeof task._stream_enabled === "boolean" ? task._stream_enabled : Boolean(providerConfig.stream ?? cfg.get("stream", true));
+    const thinkEnabled = Boolean(cfg.get("think_mode", false));
 
     const payload = {
       model: String(providerConfig.model || "qwen3:14b"),
       messages,
       stream: Boolean(streamEnabled),
+      think: thinkEnabled,
       options: generation,
       context: cachedContext.length ? cachedContext : undefined,
     };
 
-    let response: import("axios").AxiosResponse;
-    try {
-      response = await axios.post(url, payload, {
+    const postChat = async (body: Record<string, unknown>) =>
+      axios.post(url, body, {
         headers: { "content-type": "application/json" },
         signal: opts?.cancelSignal,
         responseType: streamEnabled ? "stream" : "json",
         validateStatus: () => true,
         timeout: 360000,
       });
+
+    let response: import("axios").AxiosResponse;
+    try {
+      response = await postChat(payload as Record<string, unknown>);
     } catch (e: any) {
       const errStr = String(e);
       if (errStr.includes("ECONNREFUSED") || errStr.includes("AggregateError")) {
@@ -99,11 +143,34 @@ export class OllamaProvider extends Provider {
       throw new Error(`Ollama connection error: ${errStr}`);
     }
 
+    // Some Ollama/chat combinations 500 with cached context or aggressive options.
+    // Retry once with a safe, minimal payload before failing the turn.
+    if (response.status === 500) {
+      const safeOptions = { ...generation };
+      delete (safeOptions as Record<string, unknown>).num_ctx;
+      delete (safeOptions as Record<string, unknown>).num_predict;
+      try {
+        const retried = await postChat({
+          model: String(providerConfig.model || "qwen3:14b"),
+          messages,
+          stream: Boolean(streamEnabled),
+          think: thinkEnabled,
+          options: safeOptions,
+        });
+        if (retried.status >= 200 && retried.status < 300) {
+          response = retried;
+        }
+      } catch {
+        // Keep original response for detailed error below.
+      }
+    }
+
     if (response.status === 404) {
       throw new Error(`Model '${payload.model}' not found. Please run 'ollama pull ${payload.model}'.`);
     }
     if (response.status < 200 || response.status >= 300) {
-      throw new Error(`Ollama error: ${response.status} ${response.statusText}`);
+      const detail = summarizeOllamaErrorBody(response.data);
+      throw new Error(`Ollama error: ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ""}`);
     }
 
     let fullContent = "";
@@ -119,15 +186,11 @@ export class OllamaProvider extends Provider {
         const processLine = (line: string) => {
           const trimmed = line.trim();
           if (!trimmed) return;
+          opts?.onStreamActivity?.();
           const parsed = JSON.parse(trimmed) as any;
           const chunk = parsed?.message?.content || parsed?.response || "";
 
-          let chunkThinking = "";
-          if (parsed?.message && "thinking" in parsed.message) {
-            chunkThinking = parsed.message.thinking || "";
-          } else if (parsed && "thinking" in parsed) {
-            chunkThinking = parsed.thinking || "";
-          }
+          const chunkThinking = extractThinkingLike(parsed);
 
           if (chunkThinking) {
             if (!startedThinking) {
@@ -171,6 +234,7 @@ export class OllamaProvider extends Provider {
         };
 
         stream.on("data", (chunk: Buffer | string) => {
+          opts?.onStreamActivity?.();
           buffered += typeof chunk === "string" ? chunk : chunk.toString("utf8");
           let idx = buffered.indexOf("\n");
           while (idx >= 0) {
@@ -189,12 +253,7 @@ export class OllamaProvider extends Provider {
     } else {
       const parsed = response.data as any;
       const chunk = String(parsed?.message?.content || parsed?.response || "");
-      let chunkThinking = "";
-      if (parsed?.message && "thinking" in parsed.message) {
-        chunkThinking = String(parsed.message.thinking || "");
-      } else if (parsed && "thinking" in parsed) {
-        chunkThinking = String(parsed.thinking || "");
-      }
+      const chunkThinking = extractThinkingLike(parsed);
 
       if (chunkThinking) {
         fullContent = `<think>\n${chunkThinking}\n</think>\n${chunk}`;
@@ -221,7 +280,7 @@ export class OllamaProvider extends Provider {
     };
   }
 
-  async validate() {
+  protected async executeValidation() {
     const providerConfig = cfg.getProviderConfig("ollama");
     const endpoint = normalizeEndpoint(String(providerConfig.endpoint || "http://localhost:11434"));
     try {

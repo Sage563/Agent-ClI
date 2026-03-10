@@ -1,7 +1,21 @@
 import fs from "fs-extra";
 import os from "os";
 import path from "path";
-import say from "say";
+
+type SayModule = {
+  speak: (text: string, voice?: string, speed?: number, callback?: () => void) => void;
+};
+
+let sayModulePromise: Promise<SayModule | null> | null = null;
+
+async function loadSayModule(): Promise<SayModule | null> {
+  if (!sayModulePromise) {
+    sayModulePromise = import("say")
+      .then((mod) => (mod?.default ?? mod) as SayModule)
+      .catch(() => null);
+  }
+  return sayModulePromise;
+}
 
 export function shortId() {
   return Math.random().toString(36).slice(2, 9);
@@ -9,6 +23,8 @@ export function shortId() {
 
 export async function speakText(text: string) {
   try {
+    const say = await loadSayModule();
+    if (!say) return;
     await new Promise<void>((resolve) => {
       say.speak(text, undefined, undefined, () => resolve());
     });

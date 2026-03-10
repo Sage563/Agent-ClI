@@ -1,8 +1,8 @@
 import OpenAI from "openai";
 import { cfg } from "../config";
 import type { TaskPayload } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult} from "./base";
+import { ResilientProvider } from "./base";
 
 function buildMessages(system: string, task: TaskPayload) {
   const cloned = { ...task } as Record<string, any>;
@@ -37,8 +37,12 @@ function buildMessages(system: string, task: TaskPayload) {
   return messages;
 }
 
-export class DeepSeekProvider extends Provider {
-  async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+export class DeepSeekProvider extends ResilientProvider {
+  constructor() {
+    super({ name: "deepseek", timeout: 30000, maxRetries: 3 });
+  }
+
+  protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const apiKey = cfg.getApiKey("deepseek");
     if (!apiKey) throw new Error("DeepSeek API key not found. Use '/config deepseek_api_key <key>'.");
 
@@ -62,6 +66,7 @@ export class DeepSeekProvider extends Provider {
       let endedThinking = false;
       for await (const event of response as any) {
         if (opts?.cancelSignal?.aborted) break;
+        opts?.onStreamActivity?.();
         if (event?.usage) {
           usage.input_tokens = event.usage.prompt_tokens || usage.input_tokens;
           usage.output_tokens = event.usage.completion_tokens || usage.output_tokens;
@@ -115,7 +120,7 @@ export class DeepSeekProvider extends Provider {
     };
   }
 
-  async validate() {
+  protected async executeValidation() {
     const apiKey = cfg.getApiKey("deepseek");
     if (!apiKey) return { ok: false, message: "DeepSeek API key not set." };
     try {

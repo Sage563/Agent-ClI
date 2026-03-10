@@ -127,14 +127,17 @@ export type ConfigShape = {
   stream?: boolean;
   stream_print?: boolean;
   env_bridge_enabled?: boolean;
-  stream_timeout_ms?: number;
+  stream_timeout_ms?: number | boolean;
   stream_retry_count?: number;
+  disable_timeout_retry?: boolean;
   stream_render_fps?: number;
   mission_render_fps?: number;
   command_timeout_ms?: number;
   command_log_enabled?: boolean;
   strict_edit_requires_full_access?: boolean;
+  image_to_ascii?: boolean;
   max_budget?: number;
+  max_requests?: number;
   auto_compact_enabled?: boolean;
   auto_compact_threshold_pct?: number;
   auto_compact_keep_recent_turns?: number;
@@ -174,6 +177,31 @@ export type TaskPayload = {
 };
 
 export type MissionData = Record<string, unknown>;
+
+export interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  messages: Message[];
+}
+
+export interface AgentResponse {
+  thought?: string;
+  response?: string;
+  mode?: 'chat' | 'apply' | 'plan';
+  plan?: string;
+  changes?: any[];
+  create_file?: { file: string; content: string } | null;
+  delete_file?: { file: string } | null;
+  commands?: any[];
+  request_files?: string[];
+  mission_complete?: boolean;
+}
 
 export type SessionStats = {
   input_tokens: number;

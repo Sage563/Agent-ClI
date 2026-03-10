@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent CLi Chat</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root{--bg:var(--vscode-editor-background);--fg:var(--vscode-editor-foreground);--fg2:var(--vscode-descriptionForeground);--surface:var(--vscode-sideBar-background);--border:var(--vscode-panel-border);--ibg:var(--vscode-input-background);--ifg:var(--vscode-input-foreground);--ib:var(--vscode-input-border,transparent);--bbg:var(--vscode-button-background);--bfg:var(--vscode-button-foreground);--bh:var(--vscode-button-hoverBackground);--hover:var(--vscode-list-hoverBackground);--active:var(--vscode-list-activeSelectionBackground);--activeFg:var(--vscode-list-activeSelectionForeground);--err:var(--vscode-errorForeground,#f44);--ok:var(--vscode-terminal-ansiGreen,#4a4);--warn:var(--vscode-terminal-ansiYellow,#e8a)}
+    *{box-sizing:border-box}body{margin:0;font-family:var(--vscode-font-family);color:var(--fg);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+    .row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}.sp{flex:1}
+    .btn,.seg{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;cursor:pointer;color:var(--fg2);font-size:11px;user-select:none}
+    .btn:hover,.seg:hover{background:var(--hover);color:var(--fg)}.seg.active{background:var(--bbg);color:var(--bfg);border-color:transparent}
+    .ctl{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg2)}select{background:var(--ibg);color:var(--ifg);border:1px solid var(--ib);border-radius:4px;padding:3px 6px;font-size:11px;min-width:130px}
+    #shell{position:relative;display:flex;flex:1;min-height:0}
+    #sb{display:none;position:absolute;top:0;left:0;bottom:0;width:260px;background:var(--surface);border-right:1px solid var(--border);overflow:auto;z-index:4}#sb.open{display:block}
+    #sb .head{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;font-size:11px;color:var(--fg2)}#sb-search{padding:0 10px 10px}
+    #sb-search input{width:100%;background:var(--ibg);color:var(--ifg);border:1px solid var(--ib);border-radius:4px;padding:6px 8px;font-size:11px}
+    .sb-item{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid rgba(128,128,128,.12);cursor:pointer;font-size:11px}.sb-item:hover{background:var(--hover)}.sb-item.active{background:var(--active);color:var(--activeFg)}
+    #main{display:flex;flex-direction:column;flex:1;min-height:0}
+    #stats{display:none;padding:4px 10px;background:var(--bg);border-bottom:1px solid var(--border);font-size:10px;color:var(--fg2);display:flex;gap:12px;flex-wrap:wrap;align-items:center}#stats.show{display:flex}
+    .stat-item{display:flex;gap:4px;align-items:center}.stat-bar{height:8px;width:60px;background:var(--surface);border-radius:8px;border:1px solid var(--border);overflow:hidden;position:relative}.stat-fill{height:100%;background:var(--bbg);transition:width .3s}.stat-fill.warn{background:var(--warn)}.stat-fill.err{background:var(--err)}
+    #ctx{display:flex;gap:4px;flex-wrap:wrap;padding:6px 10px 0}#ctx:empty{display:none}.chip{font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--hover)}
+    #imgbar{display:none;align-items:center;gap:8px;padding:4px 10px;background:var(--surface);border-bottom:1px solid var(--border)}#imgbar.on{display:flex}#imgbar img{width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--border)}
+    #msgs{flex:1;min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}.hidden{display:none!important}
+    .m{max-width:92%;padding:8px 10px;border-radius:8px;line-height:1.4;word-break:break-word}.user{align-self:flex-end;background:var(--bbg);color:var(--bfg)}.agent{align-self:flex-start;background:var(--surface);border:1px solid var(--border)}.system{align-self:center;border:1px dashed var(--border);font-size:11px;color:var(--fg2)}.err{align-self:center;background:#500;color:#f88;text-align:center}.warn{align-self:center;background:rgba(232,168,0,.2);border:1px solid var(--warn);color:var(--warn)}.thinking{align-self:flex-start;background:rgba(88,124,194,.15);border-left:3px solid #5d7cb2;padding:10px;border-radius:4px}
+    .card{width:100%;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:8px 10px;font-size:11px}
+    .card.error{border-color:var(--err);background:rgba(255,68,68,.1)}.card.warn{border-color:var(--warn);background:rgba(232,168,0,.1)}
+    .panel{width:100%;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:10px;margin-bottom:8px;font-size:11px}
+    pre{background:var(--bg);border:1px solid var(--border);padding:8px;border-radius:6px;overflow:auto;font-family:var(--vscode-editor-font-family,Consolas,monospace);font-size:11px}
+    .tiny{font-size:10px;color:var(--fg2)}
+    #ia{padding:8px 10px;background:var(--surface);border-top:1px solid var(--border);position:relative;flex-shrink:0}
+    #ta{width:100%;min-height:56px;max-height:220px;resize:none;background:var(--ibg);color:var(--ifg);border:1px solid var(--ib);border-radius:6px;padding:8px 112px 8px 8px;outline:none;line-height:1.4;overflow-y:hidden}
+    #icons{position:absolute;right:54px;bottom:15px;display:flex;gap:4px}.ib{padding:2px 4px;cursor:pointer;color:var(--fg2)}.ib:hover{background:var(--hover);border-radius:4px;color:var(--fg)}
+    #send,#stop{position:absolute;right:12px;bottom:12px;width:30px;height:30px;border:none;border-radius:5px;cursor:pointer}#send{background:var(--bbg);color:var(--bfg)}#send:hover{background:var(--bh)}#stop{display:none;background:#a22;color:#fff}
+    #typing{display:none;font-size:11px;color:var(--fg2);margin-bottom:4px}#typing.on{display:block}
+    #token{position:absolute;top:-24px;right:12px;border:1px solid var(--border);background:var(--surface);font-size:10px;color:var(--fg2);padding:2px 8px;border-radius:4px;opacity:0;transition:opacity .15s}#token.on{opacity:1}
+    #suggest{display:none;position:absolute;left:10px;right:10px;bottom:62px;height:220px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;z-index:6}#suggest.open{display:flex}
+    #sg-list{width:45%;overflow:auto;border-right:1px solid var(--border)}#sg-preview{flex:1;overflow:auto;padding:8px;background:var(--bg);font-size:10px;white-space:pre;color:var(--fg2);font-family:var(--vscode-editor-font-family,Consolas,monospace)}
+    .sg-item{padding:6px 8px;font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;border-left:3px solid transparent}.sg-item:hover{background:var(--hover)}.sg-item.active{background:var(--active);color:var(--activeFg);border-left-color:var(--bbg)}
+    #cx{display:none;position:absolute;left:10px;right:10px;bottom:64px;background:var(--surface);border:1px solid var(--border);border-radius:6px;z-index:7;padding:10px;max-height:220px}#cx.open{display:block}.cx-file{padding:3px 0;font-size:11px;font-family:var(--vscode-editor-font-family,Consolas,monospace);border-bottom:1px solid rgba(128,128,128,.1)}
+    #ob{display:none;margin:auto;max-width:520px;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:18px;gap:8px;flex-direction:column;align-items:center;text-align:center}#ob.show{display:flex}
+    .ob-in{width:min(330px,100%);padding:7px 10px;border-radius:5px;border:1px solid var(--ib);background:var(--ibg);color:var(--ifg);font-size:11px}.ob-btn{padding:7px 16px;border:none;border-radius:5px;background:var(--bbg);color:var(--bfg);cursor:pointer}
+    .actions{display:flex;gap:6px;margin-top:8px}
+    .diff-view{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:var(--vscode-editor-font-family,Consolas,monospace);font-size:10px;margin-top:6px}
+    .diff-line{padding:2px 4px;font-family:monospace}.diff-add{background:rgba(76,174,76,.2);color:var(--ok)}.diff-del{background:rgba(244,68,68,.2);color:var(--err)}
+    .phase-indicator{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+    .phase-active{background:var(--ok)}.phase-pending{background:var(--fg2)}.phase-done{background:var(--ok)}
+  </style>
+</head>
+<body>
+  <div class="row"><span class="btn" id="tb-menu" title="History"><i class="codicon codicon-history"></i></span><b><i class="codicon codicon-robot"></i> Agent CLi</b><span class="sp"></span><span class="btn" id="tb-provider" title="Provider"><i class="codicon codicon-server"></i></span><span class="btn" id="tb-key" title="API Key"><i class="codicon codicon-key"></i></span><span class="btn" id="tb-detach" title="Open Fullscreen Panel"><i class="codicon codicon-screen-full"></i></span><span class="btn" id="tb-exit" title="Close Side Panel"><i class="codicon codicon-close"></i></span></div>
+  <div class="row"><label class="ctl">Model <select id="model-select"></select></label><label class="ctl">Reasoning <select id="reasoning-select"><option value="low">Low</option><option value="standard">Standard</option><option value="high">High</option></select></label><span class="sp"></span><span class="seg" id="btn-plan">PLAN</span><span class="seg" id="btn-fast">FAST</span><span class="seg" id="btn-mission">MISSION</span></div>
+  <div class="row"><span class="btn" id="qa-explain">EXPLAIN</span><span class="btn" id="qa-fix">FIX</span><span class="btn" id="qa-tests">TESTS</span><span class="btn" id="qa-docs">DOCS</span><span class="btn" id="qa-review">REVIEW</span><span class="sp"></span><span class="btn" id="sb-new" title="New Chat"><i class="codicon codicon-add"></i></span><span class="btn" id="tb-export" title="Export"><i class="codicon codicon-export"></i></span></div>
+  <div id="shell">
+    <div id="sb"><div class="head"><span>Sessions</span><span class="tiny">Pick / Delete</span></div><div id="sb-search"><input id="sb-sq" placeholder="Search chats..."></div><div id="sb-list"></div></div>
+    <div id="main">
+      <div id="stats"></div>
+      <div id="ctx"></div>
+      <div id="imgbar"><img id="imgthumb"><span id="imgname">image</span><span class="btn" id="imgrm"><i class="codicon codicon-close"></i></span></div>
+      <div id="ob"><h2><i class="codicon codicon-robot"></i> Agent CLi</h2><div class="tiny">Setup required. Pick provider, then add API key if needed.</div><input class="ob-in" id="ob-key" type="password" placeholder="Paste API key here..."><input class="ob-in" id="ob-ep" placeholder="Endpoint URL (optional)"><button class="ob-btn" id="ob-go">Continue</button></div>
+      <div id="msgs" class="hidden"></div>
+      <div id="ia" class="hidden"><div id="typing">Agent is thinking...</div><div id="token">0 tokens</div><div id="suggest"><div id="sg-list"></div><div id="sg-preview">Select a file to preview...</div></div><textarea id="ta" rows="3" placeholder="Ask Agent CLi anything... (@ to mention files)"></textarea><div id="icons"><span class="ib" id="ib-file" title="Attach files"><i class="codicon codicon-attach"></i></span><span class="ib" id="ib-img" title="Attach image"><i class="codicon codicon-device-camera"></i></span><span class="ib" id="ib-ctx" title="Current context"><i class="codicon codicon-list-tree"></i></span></div><button id="send"><i class="codicon codicon-send"></i></button><button id="stop"><i class="codicon codicon-debug-stop"></i></button></div>
+      <div id="cx"><div class="row" style="padding:0 0 6px 0;background:transparent;border:none"><b style="font-size:11px">Current Context</b><span class="sp"></span><span class="btn" id="cx-close"><i class="codicon codicon-close"></i></span></div><div id="cx-list"></div><div class="tiny" id="cx-total" style="margin-top:6px">0 tokens</div></div>
+    </div>
+  </div>
+<script>
+const V=acquireVsCodeApi(),$=id=>document.getElementById(id);
+let state={},files=[],img=null,streaming=false,curDiv=null,curRaw="",thinkingDiv=null,thinkingRaw="",sgItems=[],sgIdx=-1,sgQuery="",historyLoaded=false,autoScroll=true;
+let stats={input_tokens:0,output_tokens:0,total_cost:0,turns:0,model:"unknown",context_left:null,context_used:0,context_window:null,max_budget:null};
+const msgs=$("msgs"),ta=$("ta"),suggest=$("suggest");
+const esc=t=>String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const md=t=>{try{return marked.parse(String(t||""))}catch{return esc(t)}};
+const on=(id,fn)=>{const el=$(id);if(el)el.onclick=fn};
+marked.setOptions({gfm:true,breaks:true,headerIds:false,mangle:false});
+const renderer=new marked.Renderer();
+renderer.code=(code,lang)=>{const e=esc(code);const tid='c'+Math.random().toString(36).slice(2,10);return '<pre>'+(lang?`<span class="tiny">${esc(lang)}</span><br>`:'')+`<code id="${tid}">${e}</code><div class="actions"><button class="btn" onclick="insCode('${tid}')">Insert</button><button class="btn" onclick="cpCode(this)">Copy</button></div></pre>`};
+marked.use({renderer});
+
+// Cost calculation (from CLI cost.ts)
+const PRICING={"gpt-4o":[2.5,10.0],"gpt-4o-mini":[0.15,0.6],"claude-3-5-sonnet-20241022":[3.0,15.0],"claude-3-opus-20240229":[15.0,75.0],"claude-3-haiku-20240307":[0.25,1.25],"gemini-1.5-pro":[3.5,10.5],"gemini-1.5-flash":[0.075,0.3],"deepseek":[0.14,0.28],"ollama":[0.0,0.0]};
+function calculateCost(modelName,inputT,outputT){const key=Object.keys(PRICING).find(k=>modelName.includes(k));if(!key)return 0;const[inp,out]=PRICING[key];return(inputT/1e6)*inp+(outputT/1e6)*out;}
+function updateStats(inp,out){if(!inp&&!out)return;stats.input_tokens+=inp||0;stats.output_tokens+=out||0;const cost=calculateCost(stats.model,inp||0,out||0);stats.total_cost+=cost;stats.turns++;renderStats();}
+function renderStats(){const s=$("stats");const usedPct=Math.min(100,(stats.context_used/Math.max(1,stats.context_window||1))*100);const costPct=stats.max_budget?Math.min(100,(stats.total_cost/stats.max_budget)*100):0;const contextLeft=stats.context_window?stats.context_window-stats.context_used:null;let html=`<span class="stat-item"><i class="codicon codicon-zap"></i> ${stats.turns} turns</span>`;if(state.showCost){html+=`<span class="stat-item"><i class="codicon codicon-money"></i> $${stats.total_cost.toFixed(4)}</span>`}html+=`<span class="stat-item"><i class="codicon codicon-symbol-parameter"></i> ${stats.output_tokens}/${stats.input_tokens}</span>`;if(stats.context_window){const w=Math.min(contextLeft<=0?100:costPct,99.9);const cls=w>80?'err':w>60?'warn':'';html+=`<span class="stat-item">Context <div class="stat-bar"><div class="stat-fill ${cls}" style="width:${w}%"></div></div> ${contextLeft}/${stats.context_window}</span>`}if(stats.max_budget&&stats.max_budget>0){const w=Math.min(costPct,99.9);const cls=w>80?'err':w>60?'warn':'';html+=`<span class="stat-item">Budget <div class="stat-bar"><div class="stat-fill ${cls}" style="width:${w}%"></div></div> $${stats.total_cost.toFixed(3)}/$${stats.max_budget.toFixed(2)}</span>`}s.innerHTML=html;s.classList.toggle('show',!!stats.model)}
+
+function resizeTa(){ta.style.height='auto';const h=Math.max(56,Math.min(220,ta.scrollHeight));ta.style.height=h+'px';ta.style.overflowY=ta.scrollHeight>220?'auto':'hidden'}
+function tokenHud(){const tok=Math.ceil(ta.value.length/4);const e=$("token");e.textContent=tok+' tokens';e.classList.toggle('on',tok>0)}
+function add(cls,html){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=html;msgs.appendChild(d);if(autoScroll)msgs.scrollTop=msgs.scrollHeight;return d}
+function addCard(html){const d=document.createElement('div');d.className='card';d.innerHTML=html;msgs.appendChild(d);if(autoScroll)msgs.scrollTop=msgs.scrollHeight;return d}
+function clearComposer(){ta.value='';resizeTa();tokenHud();ta.focus();sgItems=[];sgIdx=-1;renderSg()}
+function renderCtx(){const c=$("ctx");let h=files.map((f,i)=>`<span class="chip"><i class="codicon codicon-file-code"></i> ${esc((f.split(/[\\/]/).pop()||f))} <span class="rm" data-i="${i}" style="cursor:pointer">x</span></span>`).join('');if(files.length>1)h+='<span class="chip" id="ctx-clear" style="margin-left:auto;color:var(--err);cursor:pointer">Clear All</span>';c.innerHTML=h;c.querySelectorAll('.rm').forEach(el=>el.onclick=()=>{files.splice(+el.dataset.i,1);renderCtx()});if($("ctx-clear"))$("ctx-clear").onclick=()=>{files=[];renderCtx()};renderCxPanel()}
+function renderCxPanel(){const list=$("cx-list");list.innerHTML=files.map(f=>`<div class="cx-file"><i class="codicon codicon-file-code"></i> ${esc(f)}</div>`).join('')||'<div class="tiny">No files attached.</div>';$("cx-total").textContent=Math.ceil(files.join(' ').length/4)+' tokens'}
+function renderImage(){if(!img){$("imgbar").classList.remove('on');$("imgthumb").src='';$("imgname").textContent='image';return;}$("imgbar").classList.add('on');$("imgthumb").src=img;$("imgname").textContent='image attached'}
+function renderSb(ss){const q=(("sb-sq")&&$("sb-sq").value||'').toLowerCase();const f=(ss||[]).filter(s=>(s.title||'').toLowerCase().includes(q));$("sb-list").innerHTML=f.map(s=>`<div class="sb-item ${s.active?'active':''}" data-id="${s.id}"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title||'New Chat')}</span><span class="tiny">${s.msgCount}</span><span data-x="${s.id}" class="btn" style="padding:1px 5px">x</span></div>`).join('')||'<div class="tiny" style="padding:10px">No chats found</div>';$("sb-list").querySelectorAll('[data-id]').forEach(el=>el.onclick=e=>{if(e.target.dataset.x)V.postMessage({type:'deleteChat',id:e.target.dataset.x});else{V.postMessage({type:'switchChat',id:el.dataset.id});$("sb").classList.remove('open')}})}
+function syncControls(){const ms=(state.modelOptions||[]).filter(Boolean);$("model-select").innerHTML=[...new Set(ms)].map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');if(state.model)$("model-select").value=state.model;$("reasoning-select").value=state.reasoningLevel||'standard';$("btn-plan").classList.toggle('active',!!state.planning);$("btn-fast").classList.toggle('active',!!state.fastMission);$("btn-mission").classList.toggle('active',!!state.missionMode)}
+function showChat(){msgs.classList.remove('hidden');$("ia").classList.remove('hidden');$("ob").classList.remove('show')}
+function showOb(){msgs.classList.add('hidden');$("ia").classList.add('hidden');$("ob").classList.add('show')}
+function setStreaming(v){streaming=v;$("typing").classList.toggle('on',v);$("send").style.display=v?'none':'block';$("stop").style.display=v?'block':'none';if(!v){thinkingDiv=null;thinkingRaw='';}}
+function send(){const t=ta.value.trim();if(!t||streaming)return;V.postMessage({type:'chat',text:t,files:[...files],image:img});add('user',esc(t));clearComposer()}
+function sendQA(a){if(streaming)return;const t=ta.value.trim();V.postMessage({type:'quickAction',action:a,text:t,files:[...files],image:img});add('user',`[${a.toUpperCase()}] ${esc(t||'current task')}`);clearComposer()}
+function fetchPreview(p){$("sg-preview").textContent='Loading...';V.postMessage({type:'getFilePreview',path:p})}
+function renderSg(){if(!sgItems.length){suggest.classList.remove('open');return;}suggest.classList.add('open');$("sg-list").innerHTML=sgItems.map((f,i)=>`<div class="sg-item ${i===sgIdx?'active':''}" data-i="${i}"><i class="codicon codicon-symbol-file"></i>${esc(f)}</div>`).join('');$("sg-list").querySelectorAll('.sg-item').forEach(el=>{el.onclick=()=>selectSg(+el.dataset.i);el.onmouseenter=()=>{sgIdx=+el.dataset.i;renderSg();fetchPreview(sgItems[sgIdx])}});if(sgIdx>=0&&$("sg-list").children[sgIdx])$("sg-list").children[sgIdx].scrollIntoView({block:'nearest'})}
+function selectSg(i){const f=sgItems[i];if(!f)return;const v=ta.value,at=v.lastIndexOf('@');ta.value=v.slice(0,at)+'@'+f+' '+v.slice(at+1+sgQuery.length);if(!files.includes(f)){files.push(f);renderCtx()}sgItems=[];sgIdx=-1;renderSg();resizeTa();ta.focus()}
+window.cpCode=b=>{const t=b.parentElement.querySelector('code')?.textContent||'';navigator.clipboard.writeText(t)};
+window.insCode=id=>V.postMessage({type:'insertAtCursor',text:$(id)?.textContent||''});
+
+// Enhanced rendering functions for CLI features
+function renderChangeCard(change){const file=esc(change.file||'unknown');const original=esc(change.original||'');const edited=esc(change.edited||'');const sl=change.start_line||0;const el=change.end_line||0;const lineInfo=sl&&el?`(Lines ${sl}-${el})`:'';const card=addCard(`<b><i class="codicon codicon-edit"></i> Change: ${file} ${lineInfo}</b><details><summary class="tiny">View diff</summary><div class="diff-view"><div class="diff-line diff-del">- ${original.substring(0,80)}${original.length>80?'...':''}</div><div class="diff-line diff-add">+ ${edited.substring(0,80)}${edited.length>80?'...':''}</div></div></details><div class="actions"><button class="btn acc">✓ Accept</button><button class="btn rej">✗ Reject</button></div>`);card.querySelector('.acc').onclick=()=>V.postMessage({type:'accept',changes:[change]});card.querySelector('.rej')&&(card.querySelector('.rej').onclick=()=>msgs.removeChild(card))}
+function renderCreateCard(data){const file=esc(data.file||'');const lines=(data.content||'').split('\n').length;const card=addCard(`<b><i class="codicon codicon-new-file"></i> Create: ${file}</b> (${lines} lines)<details><summary class="tiny">View content</summary><pre>${esc((data.content||'').substring(0,500))}${data.content.length>500?'...':''}</pre></details><div class="actions"><button class="btn acc">✓ Create</button><button class="btn rej">✗ Skip</button></div>`);card.querySelector('.acc').onclick=()=>V.postMessage({type:'acceptCreate',data});card.querySelector('.rej')&&(card.querySelector('.rej').onclick=()=>msgs.removeChild(card))}
+function renderDeleteCard(data){const file=esc(data.file||'');const card=addCard(`<b><i class="codicon codicon-trash"></i> Delete: ${file}</b><div class="actions"><button class="btn acc">✓ Delete</button><button class="btn rej">✗ Keep</button></div>`);card.querySelector('.acc').onclick=()=>V.postMessage({type:'acceptDelete',data});card.querySelector('.rej')&&(card.querySelector('.rej').onclick=()=>msgs.removeChild(card))}
+function renderCommandsCard(list){const safe=Array.isArray(list)?list:[];const html=safe.map((c,i)=>`<div style="display:flex;gap:6px;align-items:center;margin:4px 0;font-family:monospace;font-size:10px"><code style="flex:1;overflow:auto;background:var(--bg);padding:4px;border-radius:3px">${esc(c.command||'')}</code><button class="btn run" data-i="${i}">Run</button><button class="btn rst" data-i="${i}">✓</button></div>`).join('');const card=addCard(`<b><i class="codicon codicon-terminal"></i> Commands</b>${html||'<div class="tiny">No commands</div>'}`);card.querySelectorAll('.run').forEach(btn=>btn.onclick=()=>{const c=safe[+btn.dataset.i];if(c&&c.command)V.postMessage({type:'runCmd',cmd:c.command})});card.querySelectorAll('.rst').forEach(btn=>btn.onclick=()=>msgs.removeChild(card))}
+function renderWebSearchCard(data){const results=String(data.results||'');const queries=Array.isArray(data.queries)?data.queries:[];const queryStr=queries.length?` (${queries.join(', ')})`:'';addCard(`<b><i class="codicon codicon-search"></i> Web Search${queryStr}</b>\n${md(results)}`)}
+function renderWebBrowseCard(data){const content=String(data.content||'');const urls=Array.isArray(data.urls)?data.urls:[];const urlStr=urls.length?` - ${urls.slice(0,2).join(', ')}${urls.length>2?` +${urls.length-2}`:''}`:'';addCard(`<b><i class="codicon codicon-layers"></i> Web Content${urlStr}</b>\n${md(content)}`)}
+function renderSearchResultsCard(data){const results=String(data.results||'');const pattern=String(data.pattern||'');addCard(`<b><i class="codicon codicon-file-search"></i> Project Search${pattern?' - '+esc(pattern):''}</b>\n${md(results)}`)}
+function renderAskUserCard(data){const questions=Array.isArray(data.questions)?data.questions:[];if(!questions.length)return;const html=questions.map((q,i)=>`<div style="margin:8px 0;padding:8px;background:var(--ibg);border-left:3px solid var(--bbg);border-radius:4px"><div style="font-size:11px;color:var(--fg2);margin-bottom:4px">Q${i+1}:</div><div style="margin-bottom:6px">${md(q)}</div><input type="text" class="ob-in" id="ans-${i}" placeholder="Your answer..." style="width:100%"></div>`).join('');const card=addCard(`<b><i class="codicon codicon-question"></i> Agent Questions</b>\n<div style="margin-top:8px">${html}</div><div class="actions"><button class="btn" id="submit-answers">Submit Answers</button></div>`);card.querySelector('#submit-answers').onclick=()=>{const answers=questions.map((_,i)=>($(('ans-'+i))?.value||'').trim());const text=`Answers to agent questions:\n${questions.map((q,i)=>'Q'+(i+1)+': '+q+'\nA'+(i+1)+': '+answers[i]).join('\n\n')}`;V.postMessage({type:'chat',text:text,files:[],image:null});clearComposer()}}
+
+// Complete event handler with all CLI event types
+function handleEv(ev){switch(ev.type){
+  case'chunk':if(!curDiv){curDiv=document.createElement('div');curDiv.className='m agent';msgs.appendChild(curDiv)}curRaw+=ev.value||'';curDiv.innerHTML=md(curRaw);if(autoScroll)msgs.scrollTop=msgs.scrollHeight;break;
+  case'thinking':if(!thinkingDiv){thinkingDiv=addCard('<b><i class="codicon codicon-lightbulb"></i> Thinking...</b><pre id="think-live" style="margin-top:6px"></pre>')}thinkingRaw+=(ev.value||'');const thinkEl=thinkingDiv.querySelector('#think-live');if(thinkEl)thinkEl.textContent=thinkingRaw.trimEnd();if(autoScroll)msgs.scrollTop=msgs.scrollHeight;break;
+  case'mode':add('system',`<i class="codicon codicon-gear"></i> ${esc(ev.data||'')} mode`);break;
+  case'plan':add('system',`<i class="codicon codicon-lightbulb"></i> Plan: ${esc(ev.data||'')}`);break;
+  case'changes':(ev.data||[]).forEach(renderChangeCard);break;
+  case'create_file':if(ev.data)renderCreateCard(ev.data);break;
+  case'delete_file':if(ev.data)renderDeleteCard(ev.data);break;
+  case'commands':renderCommandsCard(ev.data);break;
+  case'web_search_result':if(ev.data)renderWebSearchCard(ev.data);break;
+  case'web_browse_result':if(ev.data)renderWebBrowseCard(ev.data);break;
+  case'search_results':if(ev.data)renderSearchResultsCard(ev.data);break;
+  case'ask_user':if(ev.data)renderAskUserCard(ev.data);break;
+  case'request_files':add('system',`<i class="codicon codicon-files"></i> Request files: ${esc((ev.data||[]).join(', '))}`);break;
+  case'mcp_call':if(ev.data)add('system',`<i class="codicon codicon-plug"></i> MCP: ${esc(ev.data.server||'')} → ${esc(ev.data.tool||'')}`);break;
+  case'mcp_result':addCard(`<b><i class="codicon codicon-plug"></i> MCP Result</b><pre>${esc(String(ev.data||'').substring(0,800))}</pre>`);break;
+  case'permission':if(ev.data)add('system',`<i class="codicon codicon-shield"></i> ${esc(ev.data.action)} ${esc(ev.data.path)} → ${ev.data.allowed?'✓ allowed':'✗ denied'}`);break;
+  case'reading_file':add('system',`<i class="codicon codicon-file-code"></i> Reading: ${esc(ev.data||'')}`);break;
+  case'writing_file':add('system',`<i class="codicon codicon-save"></i> Writing: ${esc(ev.data||'')}`);break;
+  case'running_command':add('system',`<i class="codicon codicon-terminal"></i> Running: ${esc(ev.data||'')}`);break;
+  case'cost':if(state.showCost&&ev.data){stats.model=ev.data.model||stats.model;updateStats(ev.data.input||0,ev.data.output||0);addCard(`<b><i class="codicon codicon-zap"></i> Cost</b><span class="tiny">${esc(ev.data.model||'')} | ${ev.data.input} in | ${ev.data.output} out | \\$${ev.data.cost}</span>`);}break;
+  case'mission_complete':add('system','<i class="codicon codicon-check-all"></i> ✓ Mission complete');break;
+  case'stopped':add('warn','<i class="codicon codicon-debug-stop"></i> Stopped by user');break;
+  case'error':const card=addCard(`<b><i class="codicon codicon-error"></i> Error</b><pre style="color:var(--err)">${esc(ev.message||'Unknown error')}</pre><div class="actions"><button class="btn" onclick="location.reload()">Retry</button></div>`);card.classList.add('error');break;
+}}
+
+on('tb-menu',()=>$("sb").classList.toggle('open'));on('tb-provider',()=>V.postMessage({type:'pickProvider'}));on('tb-key',()=>V.postMessage({type:'configKey'}));on('tb-detach',()=>V.postMessage({type:'openDetachedChat'}));on('tb-exit',()=>V.postMessage({type:'exit'}));on('tb-export',()=>V.postMessage({type:'exportChat'}));on('sb-new',()=>V.postMessage({type:'newChat'}));on('btn-plan',()=>V.postMessage({type:'togglePlanning'}));on('btn-fast',()=>V.postMessage({type:'toggleFastMission'}));on('btn-mission',()=>V.postMessage({type:'toggleMissionMode'}));on('qa-explain',()=>sendQA('explain'));on('qa-fix',()=>sendQA('fix'));on('qa-tests',()=>sendQA('tests'));on('qa-docs',()=>sendQA('docs'));on('qa-review',()=>sendQA('review'));on('ib-file',()=>V.postMessage({type:'pickFiles'}));on('ib-img',()=>V.postMessage({type:'pickImage'}));on('ib-ctx',()=>$("cx").classList.toggle('open'));on('cx-close',()=>$("cx").classList.remove('open'));on('imgrm',()=>{img=null;renderImage()});on('send',send);on('stop',()=>V.postMessage({type:'stop'}));on('ob-go',()=>V.postMessage({type:'onboard',provider:state.provider||'openai',key:$("ob-key")?.value||'',endpoint:$("ob-ep")?.value||''}));
+$("model-select").onchange=e=>V.postMessage({type:'setModel',model:e.target.value});$("reasoning-select").onchange=e=>V.postMessage({type:'setReasoning',level:e.target.value});$("sb-sq")&&($("sb-sq").oninput=()=>renderSb(state.sessions||[]));
+ta.oninput=()=>{resizeTa();tokenHud();const v=ta.value,at=v.lastIndexOf('@');if(at>=0&&at>=v.lastIndexOf(' ')){sgQuery=v.slice(at+1);V.postMessage({type:'suggestFiles',query:sgQuery})}else{sgItems=[];sgIdx=-1;renderSg()}};
+ta.onkeydown=e=>{if(suggest.classList.contains('open')&&sgItems.length){if(e.key==='ArrowDown'){e.preventDefault();sgIdx=(sgIdx+1)%sgItems.length;renderSg();fetchPreview(sgItems[sgIdx]);return}if(e.key==='ArrowUp'){e.preventDefault();sgIdx=(sgIdx-1+sgItems.length)%sgItems.length;renderSg();fetchPreview(sgItems[sgIdx]);return}if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();selectSg(sgIdx>=0?sgIdx:0);return}if(e.key==='Escape'){e.preventDefault();sgItems=[];sgIdx=-1;renderSg();return}}if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}};
+msgs.onscroll=()=>{autoScroll=(msgs.scrollHeight-msgs.scrollTop-msgs.clientHeight)<50};
+window.addEventListener('message',e=>{const m=e.data||{};switch(m.type){
+  case'state':state=m;stats.context_window=m.context_window;stats.context_left=m.context_left;stats.max_budget=m.max_budget;stats.model=m.model||stats.model;syncControls();renderSb(m.sessions||[]);renderStats();if(!m.onboarded)showOb();else showChat();if(!historyLoaded){msgs.innerHTML='';(m.messages||[]).forEach(msg=>add(msg.role==='user'?'user':'agent',md(msg.content)));historyLoaded=true}break;
+  case'streamStart':setStreaming(true);curDiv=null;curRaw='';thinkingDiv=null;thinkingRaw='';break;
+  case'streamEnd':setStreaming(false);break;
+  case'event':handleEv(m.event||{});break;
+  case'fileSuggestions':sgItems=m.files||[];if(sgItems.length&&sgIdx===-1){sgIdx=0;fetchPreview(sgItems[0])}if(!sgItems.length)sgIdx=-1;renderSg();break;
+  case'filePreview':if(sgItems[sgIdx]===m.path)$("sg-preview").textContent=m.content||'';break;
+  case'filesAttached':files=[...new Set([...files,...(m.files||[])])];renderCtx();break;
+  case'imageAttached':img=m.data||null;renderImage();break;
+  case'cmdResult':addCard(`<b><i class="codicon codicon-terminal"></i> Command Output</b><div class="tiny">${esc(m.cmd||'')}</div><pre style="max-height:200px;overflow:auto">${esc(m.output||'')}</pre>`);break;
+  case'clear':msgs.innerHTML='';files=[];img=null;renderCtx();renderImage();historyLoaded=false;thinkingDiv=null;thinkingRaw='';stats={input_tokens:0,output_tokens:0,total_cost:0,turns:0,model:"unknown",context_left:null,context_used:0,context_window:null,max_budget:null};renderStats();break;
+}});
+resizeTa();tokenHud();renderCtx();renderImage();renderStats();V.postMessage({type:'getState'});
+</script>
+</body>
+</html>

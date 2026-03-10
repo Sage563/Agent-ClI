@@ -74,7 +74,7 @@ registry.register("/init", "Analyze project and generate AGENTS.md")(async () =>
   if (fs.existsSync("Dockerfile")) commands.push("docker build -t app .");
 
   let content = "# Project Instructions\n\n";
-  content += "This file is automatically read by Agent CLI to understand your project.\n";
+  content += "This file is automatically read by Agent CLi to understand your project.\n";
   content += "Edit it to customize the agent's behavior for this project.\n\n";
   content += "## Tech Stack\n";
   if (detectedTech.length) detectedTech.forEach((tech) => (content += `- ${tech}\n`));

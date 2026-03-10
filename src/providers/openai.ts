@@ -1,11 +1,14 @@
 import OpenAI from "openai";
 import { cfg } from "../config";
 import type { TaskPayload } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult, ProviderConfig } from "./base";
+import { ResilientProvider } from "./base";
 
 
-export class OpenAIProvider extends Provider {
+export class OpenAIProvider extends ResilientProvider {
+  constructor() {
+    super({ name: "openai", timeout: 30000, maxRetries: 3 });
+  }
   private buildMessages(system: string, task: TaskPayload) {
     const cloned = { ...task } as Record<string, any>;
     const history = Array.isArray(cloned.session_history) ? cloned.session_history : [];
@@ -34,7 +37,7 @@ export class OpenAIProvider extends Provider {
     return messages;
   }
 
-  async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+  protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const apiKey = cfg.getApiKey("openai");
     if (!apiKey) throw new Error("OpenAI API key not found. Please set '/config openai_api_key <key>'.");
 
@@ -89,7 +92,7 @@ export class OpenAIProvider extends Provider {
     };
   }
 
-  async validate() {
+  protected async executeValidation() {
     const apiKey = cfg.getApiKey("openai");
     if (!apiKey) return { ok: false, message: "OpenAI API key not set." };
     try {

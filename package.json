@@ -1,69 +1,414 @@
 {
-  "name": "agent-cli",
-  "version": "0.1.0",
-  "description": "Agent CLI with mission mode parity",
-  "main": "dist/index.js",
-  "bin": "build/agent-cli.cjs",
-  "license": "MIT",
-  "scripts": {
-    "gen:runtime-assets": "node scripts/generate_runtime_assets.cjs",
-    "clean": "node scripts/clean_artifacts.cjs",
-    "clean:release": "node scripts/clean_release.cjs",
-    "clean:all": "npm run clean && npm run clean:release && node -e \"const fs=require('fs'); fs.rmSync('src/runtime_assets.generated.ts',{force:true});\"",
-    "run-fresh": "node -e \"const fs=require('fs'); const os=require('os'); const path=require('path'); const base=process.env.APPDATA||path.join(os.homedir(),'AppData','Roaming'); for (const name of ['agent-cli','agent_cli']) { const p=path.join(base,name); if (fs.existsSync(p)) fs.rmSync(p,{recursive:true,force:true}); }\" && npm run clean:all",
-    "build": "npm run gen:runtime-assets && tsc -p tsconfig.json",
-    "build:clean": "npm run clean && npm run build",
-    "dev": "npm run gen:runtime-assets && tsx src/index.ts",
-    "start": "node dist/index.js",
-    "lint": "eslint . --ext .ts",
-    "test": "npm run gen:runtime-assets && vitest run src/tests",
-    "bundle:exe": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --external:readline/promises --log-override:require-resolve-not-external=silent --outfile=build/agent-cli.cjs",
-    "clean:artifacts": "npm run clean",
-    "release:checksum": "node scripts/write_release_checksum.cjs",
-    "compile": "node scripts/compile_release.cjs",
-    "exe": "npm run compile"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@google/genai": "^0.14.1",
-    "@mozilla/readability": "^0.6.0",
-    "axios": "^1.4.0",
-    "boxen": "^8.0.1",
-    "chalk": "^5.2.0",
-    "cli-cursor": "^5.0.0",
-    "cli-table3": "^0.6.5",
-    "commander": "^11.0.0",
-    "diff": "^8.0.3",
-    "duck-duck-scrape": "^2.2.5",
-    "fs-extra": "^11.1.1",
-    "inquirer": "^9.2.7",
-    "jsdom": "^26.1.0",
-    "log-update": "^6.1.0",
-    "marked": "^15.0.7",
-    "marked-terminal": "^7.3.0",
-    "mime-types": "^3.0.2",
-    "node-fetch": "3.3.2",
-    "openai": "^4.104.0",
-    "ora": "^8.2.0",
-    "say": "^0.16.0",
-    "terminal-kit": "^3.1.2"
-  },
-  "devDependencies": {
-    "@types/diff": "^8.0.0",
-    "@types/fs-extra": "^11.0.4",
-    "@types/jsdom": "^27.0.0",
-    "@types/mime-types": "^3.0.1",
-    "@types/node": "^25.3.0",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
-    "esbuild": "^0.27.3",
-    "eslint": "^8.57.1",
-    "postject": "^1.0.0-alpha.6",
-    "prettier": "^3.8.1",
-    "rcedit": "^5.0.2",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
-  }
+    "name": "agentcli-vscode",
+    "displayName": "Agent CLi",
+    "description": "AI coding agent for VS Code",
+    "version": "0.1.0",
+    "publisher": "sage563",
+    "icon": "assets/icon.png",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "AI",
+        "Chat",
+        "Programming Languages"
+    ],
+    "keywords": [
+        "ai",
+        "agent",
+        "coding",
+        "chat",
+        "copilot",
+        "assistant"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "agentcli",
+                    "title": "Agent CLi",
+                    "icon": "assets/icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "agentcli": [
+                {
+                    "type": "webview",
+                    "id": "agentcli.chatView",
+                    "name": "Chat",
+                    "icon": "$(comment-discussion)"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "agentcli.newChat",
+                "title": "Agent CLi: New Chat",
+                "icon": "$(add)"
+            },
+            {
+                "command": "agentcli.clearChat",
+                "title": "Agent CLi: Clear Chat",
+                "icon": "$(clear-all)"
+            },
+            {
+                "command": "agentcli.deleteChat",
+                "title": "Agent CLi: Delete Chat",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "agentcli.exportChat",
+                "title": "Agent CLi: Export Chat as Markdown",
+                "icon": "$(export)"
+            },
+            {
+                "command": "agentcli.selectProvider",
+                "title": "Agent CLi: Select Provider",
+                "icon": "$(server)"
+            },
+            {
+                "command": "agentcli.selectModel",
+                "title": "Agent CLi: Select Model",
+                "icon": "$(symbol-misc)"
+            },
+            {
+                "command": "agentcli.configureApiKey",
+                "title": "Agent CLi: Configure API Key",
+                "icon": "$(key)"
+            },
+            {
+                "command": "agentcli.openSettings",
+                "title": "Agent CLi: Open Settings",
+                "icon": "$(gear)"
+            },
+            {
+                "command": "agentcli.attachFile",
+                "title": "Agent CLi: Attach File to Chat",
+                "icon": "$(file-add)"
+            },
+            {
+                "command": "agentcli.attachImage",
+                "title": "Agent CLi: Attach Image",
+                "icon": "$(file-media)"
+            },
+            {
+                "command": "agentcli.openFile",
+                "title": "Agent CLi: Open File in Editor",
+                "icon": "$(go-to-file)"
+            },
+            {
+                "command": "agentcli.stopGeneration",
+                "title": "Agent CLi: Stop Generation",
+                "icon": "$(debug-stop)"
+            },
+            {
+                "command": "agentcli.togglePlanningMode",
+                "title": "Agent CLi: Toggle Planning Mode",
+                "icon": "$(checklist)"
+            },
+            {
+                "command": "agentcli.setAccessFull",
+                "title": "Agent CLi: Set Full Access",
+                "icon": "$(unlock)"
+            },
+            {
+                "command": "agentcli.setAccessLimited",
+                "title": "Agent CLi: Set Limited Access",
+                "icon": "$(lock)"
+            },
+            {
+                "command": "agentcli.resetPermissions",
+                "title": "Agent CLi: Reset Permissions",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "agentcli.showCostSummary",
+                "title": "Agent CLi: Show Cost Summary",
+                "icon": "$(graph)"
+            },
+            {
+                "command": "agentcli.focusChat",
+                "title": "Agent CLi: Focus Chat Input",
+                "icon": "$(comment)"
+            },
+            {
+                "command": "agentcli.searchChats",
+                "title": "Agent CLi: Search Chat History",
+                "icon": "$(search)"
+            },
+            {
+                "command": "agentcli.runCommand",
+                "title": "Agent CLi: Run Terminal Command",
+                "icon": "$(terminal)"
+            },
+            {
+                "command": "agentcli.explainCode",
+                "title": "Agent CLi: Explain This",
+                "icon": "$(comment-discussion)"
+            },
+            {
+                "command": "agentcli.fixCode",
+                "title": "Agent CLi: Fix/Improve This",
+                "icon": "$(tools)"
+            },
+            {
+                "command": "agentcli.openManager",
+                "title": "Agent Manager",
+                "icon": "$(layout-sidebar-left)"
+            },
+            {
+                "command": "agentcli.openDetachedChat",
+                "title": "Agent CLi: Open Detached Chat",
+                "icon": "$(screen-full)"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "agentcli.newChat",
+                    "group": "navigation@1",
+                    "when": "view == agentcli.chatView"
+                },
+                {
+                    "command": "agentcli.configureApiKey",
+                    "group": "navigation@2",
+                    "when": "view == agentcli.chatView"
+                },
+                {
+                    "command": "agentcli.openSettings",
+                    "group": "navigation@3",
+                    "when": "view == agentcli.chatView"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "agentcli.newChat"
+                },
+                {
+                    "command": "agentcli.selectProvider"
+                },
+                {
+                    "command": "agentcli.selectModel"
+                },
+                {
+                    "command": "agentcli.configureApiKey"
+                },
+                {
+                    "command": "agentcli.stopGeneration"
+                },
+                {
+                    "command": "agentcli.togglePlanningMode"
+                },
+                {
+                    "command": "agentcli.exportChat"
+                },
+                {
+                    "command": "agentcli.showCostSummary"
+                },
+                {
+                    "command": "agentcli.openDetachedChat"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "agentcli.explainCode",
+                    "group": "agentcli@1",
+                    "when": "editorHasSelection"
+                },
+                {
+                    "command": "agentcli.fixCode",
+                    "group": "agentcli@2",
+                    "when": "editorHasSelection"
+                }
+            ],
+            "menubar/help": [
+                {
+                    "command": "agentcli.openManager",
+                    "group": "1_agent@1"
+                }
+            ]
+        },
+        "keybindings": [
+            {
+                "command": "agentcli.focusChat",
+                "key": "ctrl+shift+a",
+                "mac": "cmd+shift+a"
+            },
+            {
+                "command": "agentcli.newChat",
+                "key": "ctrl+shift+n",
+                "mac": "cmd+shift+n",
+                "when": "view.agentcli.chatView.visible"
+            }
+        ],
+        "configuration": {
+            "title": "Agent CLi",
+            "properties": {
+                "agentcli.provider": {
+                    "type": "string",
+                    "default": "openai",
+                    "enum": [
+                        "openai",
+                        "anthropic",
+                        "gemini",
+                        "ollama",
+                        "deepseek",
+                        "hf"
+                    ],
+                    "enumDescriptions": [
+                        "OpenAI (GPT-4o, o1, etc.)",
+                        "Anthropic (Claude 3.5/4)",
+                        "Google Gemini",
+                        "Ollama (Local models)",
+                        "DeepSeek",
+                        "Hugging Face"
+                    ],
+                    "description": "Active AI provider"
+                },
+                "agentcli.openai.apiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "OpenAI API key"
+                },
+                "agentcli.openai.model": {
+                    "type": "string",
+                    "default": "gpt-4o",
+                    "description": "OpenAI model name"
+                },
+                "agentcli.anthropic.apiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Anthropic API key"
+                },
+                "agentcli.anthropic.model": {
+                    "type": "string",
+                    "default": "claude-sonnet-4-20250514",
+                    "description": "Anthropic model"
+                },
+                "agentcli.gemini.apiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Google Gemini API key"
+                },
+                "agentcli.gemini.model": {
+                    "type": "string",
+                    "default": "gemini-2.0-flash",
+                    "description": "Gemini model"
+                },
+                "agentcli.ollama.endpoint": {
+                    "type": "string",
+                    "default": "http://localhost:11434",
+                    "description": "Ollama endpoint"
+                },
+                "agentcli.ollama.model": {
+                    "type": "string",
+                    "default": "qwen3:14b",
+                    "description": "Ollama model"
+                },
+                "agentcli.deepseek.apiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "DeepSeek API key"
+                },
+                "agentcli.deepseek.model": {
+                    "type": "string",
+                    "default": "deepseek-chat",
+                    "description": "DeepSeek model"
+                },
+                "agentcli.hf.apiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Hugging Face API key"
+                },
+                "agentcli.hf.model": {
+                    "type": "string",
+                    "default": "microsoft/Phi-3-mini-4k-instruct",
+                    "description": "HF model"
+                },
+                "agentcli.hf.endpoint": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Custom HF inference endpoint"
+                },
+                "agentcli.stream": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable streaming responses"
+                },
+                "agentcli.mcpEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable MCP tool support"
+                },
+                "agentcli.mcpServers": {
+                    "type": "object",
+                    "default": {},
+                    "description": "MCP server configs: { name: { command, args, env } }"
+                },
+                "agentcli.planningMode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Require plan approval before applying changes"
+                },
+                "agentcli.accessMode": {
+                    "type": "string",
+                    "default": "limited",
+                    "enum": [
+                        "full",
+                        "limited"
+                    ],
+                    "description": "File access permission mode"
+                },
+                "agentcli.showCost": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show cost estimation per turn"
+                },
+                "agentcli.maxTokens": {
+                    "type": "number",
+                    "default": 4096,
+                    "description": "Max output tokens"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run build-assets && npm run compile",
+        "build-assets": "node scripts/generate_runtime_assets.cjs",
+        "precompile": "npm run build-assets",
+        "compile": "node scripts/compile.cjs",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/node": "18.x",
+        "@types/vscode": "^1.85.0",
+        "@types/fs-extra": "^11.0.4",
+        "typescript": "^5.3.3"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.32.1",
+        "@google/genai": "^0.14.1",
+        "@google/generative-ai": "^0.21.0",
+        "asciify-image": "^0.1.10",
+        "axios": "^1.6.2",
+        "boxen": "^7.1.1",
+        "chalk": "^4.1.2",
+        "cli-table3": "^0.6.3",
+        "diff": "^8.0.3",
+        "duck-duck-scrape": "^2.2.7",
+        "fs-extra": "^11.3.4",
+        "log-update": "^4.0.0",
+        "marked": "^11.1.1",
+        "marked-terminal": "^6.2.0",
+        "mime-types": "^3.0.2",
+        "openai": "^4.24.0",
+        "readline": "^1.3.0",
+        "say": "^0.16.0",
+        "terminal-image": "^4.2.0"
+    }
 }

@@ -1,3 +1,3 @@
-declare module "marked-terminal" {
-  export function markedTerminal(options?: Record<string, unknown>): any;
-}
+declare module 'marked-terminal';
+declare module 'asciify-image';
+declare module 'terminal-image';
