@@ -127,14 +127,17 @@ export type ConfigShape = {
   stream?: boolean;
   stream_print?: boolean;
   env_bridge_enabled?: boolean;
-  stream_timeout_ms?: number;
+  stream_timeout_ms?: number | boolean;
   stream_retry_count?: number;
+  disable_timeout_retry?: boolean;
   stream_render_fps?: number;
   mission_render_fps?: number;
   command_timeout_ms?: number;
   command_log_enabled?: boolean;
   strict_edit_requires_full_access?: boolean;
+  image_to_ascii?: boolean;
   max_budget?: number;
+  max_requests?: number;
   auto_compact_enabled?: boolean;
   auto_compact_threshold_pct?: number;
   auto_compact_keep_recent_turns?: number;

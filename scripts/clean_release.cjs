@@ -5,9 +5,10 @@ const path = require("path");
 
 const ROOT = process.cwd();
 const RELEASE_DIR = path.join(ROOT, "release");
+const MANAGED_RELEASE_EXE = /^(agent_cli|agent-cli)(-\d{8}-\d{6})?\.exe(\.sha256)?$/i;
 
 function shouldDelete(name) {
-  return /\.exe(\.sha256)?$/i.test(name);
+  return MANAGED_RELEASE_EXE.test(name);
 }
 
 function main() {

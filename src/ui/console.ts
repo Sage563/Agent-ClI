@@ -8,6 +8,11 @@ import { markedTerminal } from "marked-terminal";
 import { cfg } from "../config";
 import { getActiveSessionName } from "../memory";
 
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
+
 const termOpts = markedTerminal({
   emoji: false,
   tab: 2,
@@ -51,6 +56,44 @@ let PROMPT_INPUT_ACTIVE = false;
 
 export function reloadTheme() {
   THEME = cfg.getTheme();
+}
+
+/**
+ * Robust ANSI-aware string truncation and padding.
+ * @param text The input text (potentially containing ANSI escape codes)
+ * @param width The target display width
+ * @param truncateWithEllipsis Whether to add '...' if truncated
+ */
+export function fit(text: string, width: number, truncateWithEllipsis = true): string {
+  if (width <= 0) return "";
+  const ANSI_REGEX = /\x1B\[[0-9;]*[JKmsu]/g;
+  const visible = text.replace(ANSI_REGEX, "");
+
+  if (visible.length <= width) {
+    return text + " ".repeat(width - visible.length);
+  }
+
+  if (!truncateWithEllipsis || width <= 3) return visible.slice(0, width);
+
+  // ANSI-aware truncation
+  let result = "";
+  let visibleCount = 0;
+  let i = 0;
+  const target = width - 3;
+
+  while (i < text.length && visibleCount < target) {
+    if (text[i] === "\x1B" && text[i + 1] === "[") {
+      let j = i + 2;
+      while (j < text.length && !/[JKmsu]/.test(text[j])) j++;
+      result += text.slice(i, j + 1);
+      i = j + 1;
+    } else {
+      result += text[i];
+      visibleCount++;
+      i++;
+    }
+  }
+  return result + "..." + "\x1B[0m";
 }
 
 export const ROUNDED = "round";
@@ -99,9 +142,7 @@ function renderMarkdown(content: string) {
 function normalizeResponseText(content: string) {
   return String(content || "")
     .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\u0000/g, "");
 }
 
 function styleMarkdownLine(content: string, colorName?: string) {
@@ -140,6 +181,7 @@ export function renderPanel(content: string, title = "", style?: string, _fullWi
       borderColor: normalizeColorName(style || THEME.primary),
       padding: { top: 0, bottom: 0, left: 1, right: 1 },
       margin: { top: 1, bottom: 1, left: 0, right: 0 },
+      width: width,
     });
   }
 
@@ -159,6 +201,34 @@ export function printPanel(content: string, title = "", style?: string, fullWidt
 
 export function printError(msg: string) {
   console.error(styleMarkdownLine(`Error: ${msg}`, THEME.error));
+}
+
+export async function printImage(filePath: string) {
+  try {
+    const cols = Math.max(40, process.stdout.columns || 80);
+    const useAscii = Boolean(cfg.get("image_to_ascii"));
+
+    if (useAscii) {
+      const asciify = (await (new Function("return import('asciify-image')"))()) as any;
+      const asciifyFn = asciify.default && typeof asciify.default === "function" ? asciify.default : (typeof asciify === "function" ? asciify : asciify.default || asciify);
+
+      const opts = {
+        fit: "original" as const,
+        width: cols,
+        height: Math.max(10, (process.stdout.rows || 30) - 2),
+        color: true,
+      };
+      const result = await asciifyFn(filePath, opts);
+      console.log(result);
+      return;
+    }
+
+    const ti = (await (new Function("return import('terminal-image')"))()) as any;
+    const terminalImage = ti.default && typeof ti.default.file === "function" ? ti.default : (ti.file ? ti : ti.default || ti);
+    console.log(await terminalImage.file(filePath, { width: "100%", height: "100%" }));
+  } catch (error) {
+    console.log(`[Image could not be rendered in terminal: ${filePath}] (${String(error)})`);
+  }
 }
 
 export function printSuccess(msg: string) {
@@ -301,6 +371,7 @@ export class MissionBoard {
   private liveActive = false;
   private renderTimer: NodeJS.Timeout | null = null;
   private readonly renderIntervalMs: number;
+  private progressDoneCount = 0;
 
   constructor(title = "Mission Board") {
     this.title = title;
@@ -349,7 +420,15 @@ export class MissionBoard {
 
     // Update internal state before deciding what to render.
     this.status = nextStatus;
-    if (args.tasks) this.tasks = args.tasks;
+    if (args.tasks) {
+      const prior = this.tasks;
+      this.tasks = args.tasks.map((task, idx) => ({
+        ...task,
+        done: Boolean(task.done) || Boolean(prior[idx]?.done) || idx < this.progressDoneCount,
+      }));
+      const doneNow = this.tasks.filter((t) => t.done).length;
+      if (doneNow > this.progressDoneCount) this.progressDoneCount = doneNow;
+    }
     if (typeof args.thought === "string") this.thought = args.thought;
     if (typeof args.status_style === "string") this.statusStyle = args.status_style;
     if (typeof args.live_field === "string") this.liveField = args.live_field;
@@ -395,8 +474,13 @@ export class MissionBoard {
       liveLines.push(chalk.bold(`Task Progress: ${progress}`));
     }
     if (this.liveText) {
-      const frame = this.spinnerFrames[this.spinnerFrameIdx % this.spinnerFrames.length];
-      liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText} ${frame}`));
+      const waitingForUser = String(this.status || "").trim().toUpperCase() === "WAITING FOR USER";
+      if (waitingForUser) {
+        liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText}`));
+      } else {
+        const frame = this.spinnerFrames[this.spinnerFrameIdx % this.spinnerFrames.length];
+        liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText} ${frame}`));
+      }
     }
 
     if (liveLines.length === 0) {
@@ -418,6 +502,16 @@ export class MissionBoard {
 
   setStreaming(_active: boolean) {
     // No-op for appended mode
+  }
+
+  setProgressDone(doneCount: number) {
+    const normalized = Math.max(0, Math.floor(doneCount || 0));
+    this.progressDoneCount = normalized;
+    if (this.tasks.length) {
+      this.tasks = this.tasks.map((task, idx) => ({ ...task, done: idx < normalized || Boolean(task.done) }));
+    }
+    this.liveDirty = true;
+    this.renderLive();
   }
 
   markTaskDone(taskIndex: number) {

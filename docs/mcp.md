@@ -1,6 +1,6 @@
-# Model Context Protocol (MCP) in Agent CLI
+# Model Context Protocol (MCP) in Agent CLi
 
-Agent CLI natively supports the **Model Context Protocol (MCP)**. This powerful protocol allows the autonomous agent to interface with a massive, growing ecosystem of external tools, prompts, databases, and resources.
+Agent CLi natively supports the **Model Context Protocol (MCP)**. This powerful protocol allows the autonomous agent to interface with a massive, growing ecosystem of external tools, prompts, databases, and resources.
 
 ---
 
@@ -31,7 +31,7 @@ Display all configured servers alongside their startup commands:
 Servers running MCP tools can be configured directly in your `agent.config.json` (located in `%APPDATA%/agent-cli` on Windows).
 
 ### Adding Servers via CLI
-You can add a completely new server natively through an Agent CLI session:
+You can add a completely new server natively through an Agent CLi session:
 ```bash
 /mcp add weather npx -y @modelcontextprotocol/server-weather
 ```

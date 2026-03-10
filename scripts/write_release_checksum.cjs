@@ -6,6 +6,7 @@ const crypto = require("crypto");
 
 const ROOT = process.cwd();
 const RELEASE_DIR = path.join(ROOT, "release");
+const MANAGED_RELEASE_EXE = /^(agent_cli|agent-cli)(-\d{8}-\d{6})?\.exe$/i;
 
 function sha256(filePath) {
   const hash = crypto.createHash("sha256");
@@ -20,7 +21,7 @@ function main() {
     return;
   }
 
-  const entries = fs.readdirSync(RELEASE_DIR).filter((f) => f.toLowerCase().endsWith(".exe"));
+  const entries = fs.readdirSync(RELEASE_DIR).filter((f) => MANAGED_RELEASE_EXE.test(f));
   if (!entries.length) {
     console.log("no exe files found, skipping checksum.");
     return;
@@ -41,4 +42,3 @@ function main() {
 }
 
 main();
-

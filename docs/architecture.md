@@ -1,8 +1,8 @@
 # Architecture Overview
 
-The Agent CLI is structured around a central orchestration engine, provider adapters, and a reactive terminal user interface.
+The Agent CLi is structured around a central orchestration engine, provider adapters, and a reactive terminal user interface.
 
-## 🔄 Runtime Flow
+##  Runtime Flow
 
 The application execution lifecycle follows these primary steps:
 
@@ -19,7 +19,7 @@ The application execution lifecycle follows these primary steps:
 
 ---
 
-## 🧩 Core Modules
+##  Core Modules
 
 - **`src/core/agent.ts`**: Orchestrates the central task lifecycle.
 - **`src/core/events.ts`**: A robust, strongly-typed event bus for execution state broadcasting.
@@ -32,7 +32,7 @@ The application execution lifecycle follows these primary steps:
 
 ---
 
-## 📡 Provider Adapters
+##  Provider Adapters
 
 The system interfaces with Large Language Models through unified provider adapters located in `src/providers/*`:
 
@@ -59,7 +59,7 @@ Key categories include:
 
 ---
 
-## 💾 Session & Storage Hierarchy
+##  Session & Storage Hierarchy
 
 All user configuration, secrets, and historical session logs are stored securely in the local application data directory.
 

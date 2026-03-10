@@ -5,7 +5,7 @@ import readline from "readline";
 import chalk from "chalk";
 import logUpdate from "log-update";
 import { cfg } from "./config";
-import { reloadTheme, console, printPanel, THEME, resetScrollRegion } from "./ui/console";
+import { reloadTheme, console, fit, printPanel, THEME, resetScrollRegion } from "./ui/console";
 import { APP_ONBOARDING_ART } from "./app_dirs";
 import { BUILTIN_PROVIDERS, getProviderLabel } from "./providers/catalog";
 
@@ -92,11 +92,7 @@ function padAnsi(text: string, width: number) {
 }
 
 function fitAnsi(text: string, width: number) {
-  if (width <= 0) return "";
-  if (visibleLength(text) <= width) return padAnsi(text, width);
-  const plain = text.replace(ANSI_RE, "");
-  if (width <= 1) return plain.slice(0, width);
-  return `${plain.slice(0, width - 1)}...`;
+  return fit(text, width);
 }
 
 function wrapPlain(text: string, width: number) {
@@ -294,7 +290,7 @@ function renderScreen(params: {
   const selectedBg = resolved === "dark" ? chalk.bgCyan.black : chalk.bgBlue.white;
 
   const art = treeArt(mode, frame);
-  const cols = Math.max(60, Math.min(100, process.stdout.columns || 120));
+  const cols = Math.max(60, (process.stdout.columns || 120) - 2);
   const rows = Math.max(18, process.stdout.rows || 32);
   const contentRows = Math.max(10, rows - 2);
   const inner = Math.max(40, cols - 4);
@@ -562,7 +558,7 @@ export async function runFirstLaunchOnboarding() {
 
   const themeIdx = await selectWithArrows({
     modeFromIndex: (idx) => THEME_OPTIONS[idx]?.value || "dark",
-    title: "Welcome to Agent CLI",
+    title: "Welcome to Agent CLi",
     description: [
       "First-time setup will take about one minute.",
       "Choose your color theme. This theme is used across the entire CLI UI.",

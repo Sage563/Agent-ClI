@@ -276,6 +276,9 @@ export function createRenderThrottler(fps: number, callback: () => void) {
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promise;
+  }
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
     promise
@@ -290,13 +293,62 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
   });
 }
 
+function withActivityTimeout<T>(
+  promiseFactory: (markActivity: () => void) => Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promiseFactory(() => {
+      // Unlimited mode: activity marks are ignored because timeout checks are disabled.
+    });
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let lastActivity = Date.now();
+    const checkIntervalMs = Math.max(50, Math.floor(Math.min(timeoutMs, 500) / 2));
+
+    const markActivity = () => {
+      lastActivity = Date.now();
+    };
+
+    const timer = setInterval(() => {
+      if (settled) return;
+      if (Date.now() - lastActivity > timeoutMs) {
+        settled = true;
+        clearInterval(timer);
+        reject(new Error(timeoutMessage));
+      }
+    }, checkIntervalMs);
+
+    promiseFactory(markActivity)
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        reject(error);
+      });
+  });
+}
+
 export async function callWithStreamRecovery<T>(params: {
   streamRetryCount: number;
   streamTimeoutMs: number;
-  run: (streamEnabled: boolean) => Promise<T>;
+  run: (streamEnabled: boolean, markActivity?: () => void) => Promise<T>;
 }) {
   const attempts = Math.max(0, Math.floor(params.streamRetryCount || 0));
-  const timeoutMs = Math.max(1_000, Math.floor(params.streamTimeoutMs || 90_000));
+  const timeoutRaw = Number(params.streamTimeoutMs);
+  const timeoutMs = !Number.isFinite(timeoutRaw)
+    ? 90_000
+    : timeoutRaw <= 0
+      ? 0
+      : Math.max(1_000, Math.floor(timeoutRaw));
   const health: StreamHealthState = {
     attempts: 0,
     timeout_ms: timeoutMs,
@@ -307,10 +359,10 @@ export async function callWithStreamRecovery<T>(params: {
   for (let i = 0; i <= attempts; i += 1) {
     try {
       health.attempts = i + 1;
-      const result = await withTimeout(
-        params.run(true),
+      const result = await withActivityTimeout(
+        (markActivity) => params.run(true, markActivity),
         timeoutMs,
-        `Streaming timed out after ${timeoutMs}ms.`,
+        `Streaming timed out after ${timeoutMs}ms (no chunk activity).`,
       );
       return { result, health };
     } catch (error) {
@@ -327,4 +379,3 @@ export async function callWithStreamRecovery<T>(params: {
   );
   return { result: fallback, health };
 }
-

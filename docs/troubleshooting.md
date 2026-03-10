@@ -1,10 +1,10 @@
 # Troubleshooting Guide
 
-This guide covers common issues, symptoms, and their resolutions when using Agent CLI.
+This guide covers common issues, symptoms, and their resolutions when using Agent CLi.
 
 ---
 
-## 🔑 Provider & API Issues
+##  Provider & API Issues
 
 ### **Symptom**
 The agent outputs: `Provider initialization failed` or `API key not found`.
@@ -23,7 +23,7 @@ The agent outputs: `Provider initialization failed` or `API key not found`.
 
 ---
 
-## 🖥 Local Ollama Unreachable
+##  Local Ollama Unreachable
 
 ### **Symptom**
 The agent outputs: `Could not connect to Ollama`.
@@ -32,7 +32,7 @@ The agent outputs: `Could not connect to Ollama`.
 1. **Ensure Ollama is running:**
    Start the local Ollama application or background service.
 2. **Verify the endpoint configuration:**
-   Confirm Agent CLI refers to the correct local port:
+   Confirm Agent CLi refers to the correct local port:
    ```bash
    /config endpoint http://localhost:11434
    ```
@@ -43,7 +43,7 @@ The agent outputs: `Could not connect to Ollama`.
 
 ---
 
-## 🐢 Streaming Freezes or UI Stalls
+##  Streaming Freezes or UI Stalls
 
 ### **Symptom**
 The text output stream stalls indefinitely, freezes the TUI, or forcefully falls back to a non-streamed batched mode.
@@ -66,7 +66,7 @@ The text output stream stalls indefinitely, freezes the TUI, or forcefully falls
 
 ---
 
-## 🔒 File Access Denied
+##  File Access Denied
 
 ### **Symptom**
 The agent indicates it cannot read or write to required workspace files during its operation.
@@ -108,9 +108,9 @@ Terminal commands executed by the agent forcefully terminate with a timeout erro
 
 ---
 
-## 🔧 Continuous Integration (CI) Failures
+##  Continuous Integration (CI) Failures
 
-If you are developing for Agent CLI, you might encounter failures on Lint, Test, or Build.
+If you are developing for Agent CLi, you might encounter failures on Lint, Test, or Build.
 
 ### **Run locally to verify**
 Always run the validation suite locally before pushing:

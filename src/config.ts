@@ -135,14 +135,19 @@ export class Config {
     if (typeof this.config.stream !== "boolean") this.config.stream = true;
     if (typeof this.config.stream_print !== "boolean") this.config.stream_print = true;
     if (typeof this.config.env_bridge_enabled !== "boolean") this.config.env_bridge_enabled = true;
-    if (typeof this.config.stream_timeout_ms !== "number") this.config.stream_timeout_ms = 300_000;
+    if (typeof this.config.stream_timeout_ms !== "number" && this.config.stream_timeout_ms !== false) {
+      this.config.stream_timeout_ms = false;
+    }
     if (typeof this.config.stream_retry_count !== "number") this.config.stream_retry_count = 1;
+    if (typeof this.config.disable_timeout_retry !== "boolean") this.config.disable_timeout_retry = false;
     if (typeof this.config.stream_render_fps !== "number") this.config.stream_render_fps = 30;
     if (typeof this.config.mission_render_fps !== "number") this.config.mission_render_fps = 30;
     if (typeof this.config.command_timeout_ms !== "number") this.config.command_timeout_ms = 30_000;
     if (typeof this.config.command_log_enabled !== "boolean") this.config.command_log_enabled = true;
     if (typeof this.config.strict_edit_requires_full_access !== "boolean") this.config.strict_edit_requires_full_access = false;
+    if (typeof this.config.image_to_ascii !== "boolean") this.config.image_to_ascii = false;
     if (typeof this.config.max_budget !== "number") this.config.max_budget = 10.0;
+    if (typeof this.config.max_requests !== "number") this.config.max_requests = 0;
     if (typeof this.config.include_history !== "boolean") this.config.include_history = false;
     if (typeof this.config.auto_compact_enabled !== "boolean") this.config.auto_compact_enabled = true;
     if (typeof this.config.auto_compact_threshold_pct !== "number") this.config.auto_compact_threshold_pct = 90;
@@ -205,6 +210,8 @@ export class Config {
 
     const maxBudget = readNum("AGENT_MAX_BUDGET");
     if (maxBudget !== undefined) setConfigValue("max_budget", maxBudget);
+    const maxRequests = readNum("AGENT_MAX_REQUESTS");
+    if (maxRequests !== undefined) setConfigValue("max_requests", Math.max(0, Math.floor(maxRequests)));
     const runPolicy = String(env.AGENT_RUN_POLICY || "").trim().toLowerCase();
     if (runPolicy && ["ask", "always", "never"].includes(runPolicy)) setConfigValue("run_policy", runPolicy);
     const streamTimeout = readNum("AGENT_STREAM_TIMEOUT_MS");
@@ -219,8 +226,12 @@ export class Config {
     if (commandTimeout !== undefined) setConfigValue("command_timeout_ms", commandTimeout);
     const commandLog = readBool("AGENT_COMMAND_LOG_ENABLED");
     if (commandLog !== undefined) setConfigValue("command_log_enabled", commandLog);
+    const disableTimeoutRetry = readBool("AGENT_DISABLE_TIMEOUT_RETRY");
+    if (disableTimeoutRetry !== undefined) setConfigValue("disable_timeout_retry", disableTimeoutRetry);
     const strictEditAccess = readBool("AGENT_STRICT_EDIT_REQUIRES_FULL_ACCESS");
     if (strictEditAccess !== undefined) setConfigValue("strict_edit_requires_full_access", strictEditAccess);
+    const imageToAscii = readBool("AGENT_IMAGE_TO_ASCII");
+    if (imageToAscii !== undefined) setConfigValue("image_to_ascii", imageToAscii);
 
     const byProvider: Record<string, { model: string; endpoint: string; key: string }> = {
       ollama: { model: "OLLAMA_MODEL", endpoint: "OLLAMA_ENDPOINT", key: "" },

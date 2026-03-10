@@ -1,7 +1,7 @@
 {
   "name": "agent-cli",
   "version": "0.1.0",
-  "description": "Agent CLI with mission mode parity",
+  "description": "Agent CLi with mission mode parity",
   "main": "dist/index.js",
   "bin": "build/agent-cli.cjs",
   "license": "MIT",
@@ -27,6 +27,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^0.14.1",
     "@mozilla/readability": "^0.6.0",
+    "asciify-image": "^0.1.10",
     "axios": "^1.4.0",
     "boxen": "^8.0.1",
     "chalk": "^5.2.0",
@@ -46,6 +47,7 @@
     "openai": "^4.104.0",
     "ora": "^8.2.0",
     "say": "^0.16.0",
+    "terminal-image": "^4.2.0",
     "terminal-kit": "^3.1.2"
   },
   "devDependencies": {

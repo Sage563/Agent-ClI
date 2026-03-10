@@ -3,6 +3,8 @@ import path from "path";
 import chalk from "chalk";
 import logUpdate from "log-update";
 import { getProjectFiles, searchProjectFiles, type ProjectFileEntry } from "../file_browser";
+import { cfg } from "../config";
+import { console, fit } from "./console";
 
 export type ContextPickerResult = {
   action: "confirm" | "cancel";
@@ -19,6 +21,7 @@ type PreviewResult = {
   lines: string[];
   truncated: boolean;
   binary: boolean;
+  image: boolean;
   error?: string;
 };
 
@@ -56,29 +59,44 @@ const isUp = (key: string) => key === "\x1b[A" || key === "\x1bOA" || /^\x1b\[\d
 const isDown = (key: string) => key === "\x1b[B" || key === "\x1bOB" || /^\x1b\[\d+;\d+B$/.test(key);
 
 export function readPreviewLines(filePath: string, maxLines = 20, maxBytes = 131072): PreviewResult {
+  if (!filePath || typeof filePath !== "string") {
+    return { lines: ["[Invalid file path]"], truncated: false, binary: false, image: false, error: "Invalid path" };
+  }
   const full = path.resolve(process.cwd(), filePath);
   let fd: number | null = null;
   try {
+    const ext = path.extname(full).toLowerCase();
+    const isImage = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].includes(ext);
+
     fd = fs.openSync(full, "r");
     const size = fs.fstatSync(fd).size;
+
+    if (isImage) {
+      if (size > 10 * 1024 * 1024) {
+        return { lines: [`[Image too large to preview: ${(size / 1024 / 1024).toFixed(2)}MB]`], truncated: false, binary: true, image: true };
+      }
+      return { lines: [`[Loading Image: ${path.basename(full)} - ${(size / 1024).toFixed(1)}KB]...`], truncated: false, binary: false, image: true };
+    }
+
     const readLen = Math.max(1, Math.min(maxBytes, size || maxBytes));
     const buf = Buffer.alloc(readLen);
     const bytesRead = fs.readSync(fd, buf, 0, readLen, 0);
     const sample = buf.subarray(0, bytesRead);
     if (sample.includes(0)) {
-      return { lines: ["[Binary file preview unavailable]"], truncated: false, binary: true };
+      return { lines: ["[Binary file preview unavailable]"], truncated: false, binary: true, image: false };
     }
 
     const text = sample.toString("utf8");
     const rawLines = text.split(/\r?\n/);
     const lines = rawLines.slice(0, Math.max(1, maxLines));
     const truncated = rawLines.length > maxLines || bytesRead < size;
-    return { lines, truncated, binary: false };
+    return { lines, truncated, binary: false, image: false };
   } catch (error) {
     return {
       lines: [`[Preview error: ${String(error)}]`],
       truncated: false,
       binary: false,
+      image: false,
       error: String(error),
     };
   } finally {
@@ -92,11 +110,38 @@ export function readPreviewLines(filePath: string, maxLines = 20, maxBytes = 131
   }
 }
 
-function fit(text: string, width: number) {
-  if (width <= 0) return "";
-  if (text.length <= width) return text + " ".repeat(width - text.length);
-  if (width <= 3) return text.slice(0, width);
-  return `${text.slice(0, width - 3)}...`;
+async function loadAsyncImagePreview(filePath: string): Promise<string[]> {
+  try {
+    if (!filePath || typeof filePath !== "string") return ["[Invalid image path]"];
+    const full = path.resolve(process.cwd(), filePath);
+    const cols = Math.max(80, (process.stdout.columns || 120) - 2);
+    const leftWidth = Math.max(34, Math.floor(cols * 0.52));
+    const rightWidth = Math.max(26, cols - leftWidth - 3);
+    const listRows = Math.max(8, (process.stdout.rows || 30) - 7);
+
+    const isAscii = Boolean(cfg.get("image_to_ascii"));
+    let out: string | string[] = "";
+
+    if (isAscii) {
+      const asciify = (await (new Function("return import('asciify-image')"))()) as any;
+      const asciifyFn = asciify.default && typeof asciify.default === "function" ? asciify.default : (typeof asciify === "function" ? asciify : asciify.default || asciify);
+      out = await asciifyFn(full, { fit: "original" as const, width: Math.max(10, rightWidth - 2), height: listRows, color: true });
+    } else {
+      const ti = (await (new Function("return import('terminal-image')"))()) as any;
+      const terminalImage = ti.default && typeof ti.default.file === "function" ? ti.default : (ti.file ? ti : ti.default || ti);
+      // Use both width and height to force bounding box fit
+      const safeWidth = Math.max(10, rightWidth - 2);
+      const widthPct = Math.floor((safeWidth / cols) * 100) + "%";
+      // terminal-image height is in lines if passed as a string/number? 
+      // Actually, terminal-image is pixels-first. Using % for both is safest.
+      out = await terminalImage.file(full, { width: widthPct, height: "100%" });
+    }
+
+    const outString = Array.isArray(out) ? out.join("\n") : String(out);
+    return outString.trimEnd().split(/\r?\n/).slice(0, listRows);
+  } catch (err) {
+    return [`[Preview generation failed]`, String(err)];
+  }
 }
 
 function renderPicker(params: {
@@ -108,7 +153,7 @@ function renderPicker(params: {
   maxPreviewLines: number;
 }) {
   const { query, files, selected, highlighted, preview, maxPreviewLines } = params;
-  const cols = Math.max(80, Math.min(100, process.stdout.columns || 120));
+  const cols = Math.max(80, (process.stdout.columns || 120) - 2);
   const rows = Math.max(20, process.stdout.rows || 30);
   const leftWidth = Math.max(34, Math.floor(cols * 0.52));
   const rightWidth = Math.max(26, cols - leftWidth - 3);
@@ -123,7 +168,7 @@ function renderPicker(params: {
 
   for (let i = 0; i < listRows; i += 1) {
     const entry = files[i];
-    const previewLine = preview.lines[i] || "";
+    const previewLine = String(preview.lines[i] || "");
     const leftRaw = entry
       ? `${selected.has(entry.path) ? "[x]" : "[ ]"} ${entry.path}`
       : "";
@@ -134,11 +179,13 @@ function renderPicker(params: {
     lines.push(`${left} │ ${chalk.gray(right)}`);
   }
 
-  const previewHint = preview.binary
-    ? "[binary]"
-    : preview.truncated
-      ? `[showing first ${maxPreviewLines} lines]`
-      : "[full preview]";
+  const previewHint = preview.image
+    ? "[image visual context]"
+    : preview.binary
+      ? "[binary]"
+      : preview.truncated
+        ? `[showing first ${maxPreviewLines} lines]`
+        : "[full preview]";
   lines.push(border);
   lines.push(chalk.gray(`Preview ${previewHint}`));
   lines.push(chalk.gray("Controls: Up/Down move • Space toggle • Enter confirm • Esc cancel • Backspace delete"));
@@ -155,14 +202,35 @@ export async function openContextPicker(opts: ContextPickerOptions = {}): Promis
   const selected = new Set<string>();
   let preview = filtered.length
     ? readPreviewLines(filtered[0].path, maxPreviewLines)
-    : { lines: ["[No files found]"], truncated: false, binary: false };
+    : { lines: ["[No files found]"], truncated: false, binary: false, image: false };
+
+  let previewStateId = 0;
 
   const refresh = () => {
     filtered = query ? searchProjectFiles(allFiles, query, 500) : allFiles.slice(0, 500);
     if (highlighted >= filtered.length) highlighted = Math.max(0, filtered.length - 1);
     if (highlighted < 0) highlighted = 0;
-    preview = filtered.length ? readPreviewLines(filtered[highlighted].path, maxPreviewLines) : { lines: ["[No files found]"], truncated: false, binary: false };
+
+    if (!filtered.length) {
+      preview = { lines: ["[No files found]"], truncated: false, binary: false, image: false };
+      logUpdate(renderPicker({ query, files: filtered, selected, highlighted, preview, maxPreviewLines }));
+      return;
+    }
+
+    const currentId = ++previewStateId;
+    const item = filtered[highlighted];
+
+    preview = readPreviewLines(item.path, maxPreviewLines);
     logUpdate(renderPicker({ query, files: filtered, selected, highlighted, preview, maxPreviewLines }));
+
+    if (preview.image && !preview.binary) {
+      loadAsyncImagePreview(item.path).then((lines) => {
+        if (previewStateId === currentId) {
+          preview = { ...preview, lines };
+          logUpdate(renderPicker({ query, files: filtered, selected, highlighted, preview, maxPreviewLines }));
+        }
+      });
+    }
   };
 
   return await new Promise<ContextPickerResult>((resolve) => {

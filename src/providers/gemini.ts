@@ -1,8 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { cfg } from "../config";
 import type { TaskPayload } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult, ProviderConfig } from "./base";
+import { ResilientProvider } from "./base";
 
 function normalizeModelName(modelName: string) {
   const aliases: Record<string, string> = {
@@ -29,8 +29,12 @@ function isHardQuotaZero(errorText: string) {
   return (errorText || "").toLowerCase().includes("limit: 0");
 }
 
-export class GeminiProvider extends Provider {
-  async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+export class GeminiProvider extends ResilientProvider {
+  constructor() {
+    super({ name: "gemini", timeout: 30000, maxRetries: 3 });
+  }
+
+  protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const apiKey = cfg.getApiKey("gemini");
     if (!apiKey) throw new Error("Gemini API key not found. Use '/config gemini_api_key <key>'.");
 
@@ -139,7 +143,7 @@ export class GeminiProvider extends Provider {
     return { text: "", usage: { input_tokens: 0, output_tokens: 0 }, thinking: "" };
   }
 
-  async validate() {
+  protected async executeValidation() {
     const apiKey = cfg.getApiKey("gemini");
     if (!apiKey) return { ok: false, message: "Gemini API key not set." };
     try {

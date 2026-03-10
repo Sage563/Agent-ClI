@@ -78,6 +78,86 @@ import "../commands/status";
 import "../commands/uninstall";
 import "../commands/access";
 import "../commands/diffs";
+import "../commands/skills";
+import "../commands/assist";
+
+/**
+ * Interface for interactive UI operations that can be implemented differently
+ * by different environments (CLI console vs VS Code webview).
+ */
+export interface UISink {
+  print(text: string): void;
+  printActivity(text: string): void;
+  printError(text: string, title?: string): void;
+  printInfo(text: string): void;
+  printWarning(text: string, title?: string): void;
+  printSuccess(text: string): void;
+  printPanel(content: string, title: string, style: string, border?: boolean): void;
+  startThinking(): void;
+  stopThinking(): void;
+  promptConfirm(title: string, question: string): Promise<boolean>;
+  askInput(prompt: string): Promise<string>;
+  showDiff(file: string, original: string, edited: string): void;
+  updateMissionStatus(data: {
+    status?: string;
+    status_style?: string;
+    log?: string;
+    live_text?: string;
+    tasks?: any[];
+    thought?: string;
+  }): void;
+  setMissionProgressDone(count: number): void;
+}
+
+/**
+ * Shared context for the agent execution, containing the UI sink and environment state.
+ */
+export interface AgentContext {
+  ui: UISink;
+  cwd: string;
+}
+
+// Default CLI Implementation of UISink
+export class ConsoleUISink implements UISink {
+  print(text: string) { console.print(text); }
+  printActivity(text: string) { printActivity(text); }
+  printError(text: string, _title?: string) { printError(text); }
+  printInfo(text: string) { printInfo(text); }
+  printWarning(text: string, _title?: string) { printWarning(text); }
+  printSuccess(text: string) { printSuccess(text); }
+  printPanel(content: string, title: string, style: string, border?: boolean) {
+    printPanel(content, title, style, border);
+  }
+  startThinking() { startThinking(); }
+  stopThinking() { stopThinking(); }
+  async promptConfirm(title: string, question: string) {
+    return await askYesNo(title, question);
+  }
+  async askInput(prompt: string) {
+    return await askInput(prompt);
+  }
+  showDiff(file: string, original: string, edited: string) {
+    showDiff(file, original, edited);
+  }
+  updateMissionStatus(data: any) {
+    if (MISSION_BOARD) MISSION_BOARD.update(data);
+  }
+  setMissionProgressDone(count: number) {
+    if (MISSION_BOARD) MISSION_BOARD.setProgressDone(count);
+  }
+}
+
+let DEFAULT_CONTEXT: AgentContext = {
+  ui: new ConsoleUISink(),
+  cwd: process.cwd(),
+};
+
+/**
+ * Sets the active global agent context.
+ */
+export function setAgentContext(ctx: AgentContext) {
+  DEFAULT_CONTEXT = ctx;
+}
 
 export const SESSION_STATS: SessionStats = {
   input_tokens: 0,
@@ -163,7 +243,7 @@ function decodeJsonStringFragment(raw: string, complete: boolean) {
   }
 }
 
-const STREAM_STRING_FIELDS = ["response", "thought", "plan", "self_critique", "ask_user"] as const;
+const STREAM_STRING_FIELDS = ["response", "thought", "thinking", "plan", "self_critique", "ask_user"] as const;
 type StreamStringField = (typeof STREAM_STRING_FIELDS)[number];
 const STREAM_TOOL_KEYS = [
   "changes",
@@ -194,6 +274,7 @@ export class StreamingJsonObserver {
   private fieldStarts: Record<StreamStringField, number | null> = {
     response: null,
     thought: null,
+    thinking: null,
     plan: null,
     self_critique: null,
     ask_user: null,
@@ -201,6 +282,7 @@ export class StreamingJsonObserver {
   private emitted: Record<StreamStringField, string> = {
     response: "",
     thought: "",
+    thinking: "",
     plan: "",
     self_critique: "",
     ask_user: "",
@@ -208,6 +290,7 @@ export class StreamingJsonObserver {
   private completed: Record<StreamStringField, boolean> = {
     response: false,
     thought: false,
+    thinking: false,
     plan: false,
     self_critique: false,
     ask_user: false,
@@ -334,6 +417,7 @@ export class StreamingJsonObserver {
     return {
       response: this.emitted.response,
       thought: this.emitted.thought,
+      thinking: this.emitted.thinking,
       plan: this.emitted.plan,
       self_critique: this.emitted.self_critique,
       ask_user: this.emitted.ask_user,
@@ -348,6 +432,7 @@ export class StreamingJsonObserver {
     const deltas: Record<StreamStringField, string> = {
       response: this.updateField("response"),
       thought: this.updateField("thought"),
+      thinking: this.updateField("thinking"),
       plan: this.updateField("plan"),
       self_critique: this.updateField("self_critique"),
       ask_user: this.updateField("ask_user"),
@@ -552,6 +637,53 @@ function cleanVisibleAssistantText(value: string) {
     "",
   );
   return out.trim();
+}
+
+function hasLikelyMarkdownSyntax(value: string) {
+  const text = String(value || "");
+  if (!text.trim()) return false;
+  return (
+    /(^|\n)\s*```/.test(text) ||
+    /(^|\n)\s*~~~/.test(text) ||
+    /(^|\s)\*\*[^*\n]+\*\*/m.test(text) ||
+    /(^|\s)_[^_\n]+_/m.test(text) ||
+    /~~[^~\n]+~~/.test(text) ||
+    /`[^`\n]+`/.test(text) ||
+    /^\s{0,3}####\s+/m.test(text) ||
+    /^\s{0,3}#{1,6}\s+/m.test(text) ||
+    /^\s*[-*+]\s+/m.test(text) ||
+    /^\s*•\s+/m.test(text) ||
+    /^\s*[-*+]\s+\[[ xX]\]\s+/m.test(text) ||
+    /^\s*\d+\.\s+/m.test(text) ||
+    /!\[[^\]]*\]\([^)]+\)/.test(text) ||
+    /\[[^\]]+\]\([^)]+\)/.test(text) ||
+    /^\s*>\s+/m.test(text) ||
+    /^\s*\|.+\|\s*$/m.test(text) ||
+    /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m.test(text) ||
+    /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/m.test(text)
+  );
+}
+
+function hasPotentialMarkdownPrefix(value: string) {
+  const text = String(value || "");
+  if (!text.trim()) return false;
+  // Catch early/incomplete markdown starts so we can buffer before raw streaming damages formatting.
+  return (
+    /^\s*\*{1,4}\S*/m.test(text) ||
+    /^\s*_{1,3}\S*/m.test(text) ||
+    /^\s*~{1,3}\S*/m.test(text) ||
+    /^\s{0,3}####\s*/m.test(text) ||
+    /^\s*`{1,3}\S*/m.test(text) ||
+    /^\s*#{1,6}\s*/m.test(text) ||
+    /^\s*>\s*/m.test(text) ||
+    /^\s*[-*+]\s*/m.test(text) ||
+    /^\s*•\s*/m.test(text) ||
+    /^\s*\d+\.\s*/m.test(text) ||
+    /^\s*\|/.test(text) ||
+    /^!\[[^\]]*$/.test(text) ||
+    /\[[^\]]*$/.test(text) || // partial link label
+    /^\s{0,3}[-*_]{2,}\s*$/.test(text)
+  );
 }
 
 function extractThinkBlocks(value: string) {
@@ -1246,7 +1378,7 @@ function synthesizeChangesIfMissing(claimSource: string, currentChanges: TaskCha
       }
 
       if (!existed) {
-        const edited = sanitizeAiEditedContent(filePath.endsWith(".md") ? "# Report\n\nGenerated by Agent CLI.\n" : "");
+        const edited = sanitizeAiEditedContent(filePath.endsWith(".md") ? "# Report\n\nGenerated by Agent CLi.\n" : "");
         synthesized.push({ file: filePath, original: "", edited });
       }
     }
@@ -1703,8 +1835,17 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       return null;
     }
   }
+
+  const maxRequests = Number(cfg.get("max_requests", 0));
+  if (Number.isFinite(maxRequests) && maxRequests > 0 && SESSION_STATS.turns >= maxRequests) {
+    printWarning(
+      `Max requests reached (${maxRequests}). Update with \`/config max_requests <number>\` or set \`0\` for unlimited.`,
+    );
+    return null;
+  }
+
   if (cfg.isMissionMode() && !missionData) {
-    return missionLoop(text, safeArgs);
+    return missionLoop(text, safeArgs, DEFAULT_CONTEXT);
   }
   const inMission = Boolean(missionData && (missionData as Record<string, unknown>).is_mission);
 
@@ -1717,7 +1858,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     !safeArgs.__autoPlanDone &&
     !inMission
   ) {
-    printActivity("Plan mode enabled: generating plan artifact.");
+    DEFAULT_CONTEXT.ui.printActivity("Plan mode enabled: generating plan artifact.");
     const planningResult = await handle(
       text,
       {
@@ -1836,36 +1977,95 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   let announcedStreaming = false;
   let streamUiDisabledForTurn = false;
   let streamUiFallbackNotified = false;
+  let waitingForUserLocked = false;
+  let askUserLogged = false;
 
   let streamChunkCount = 0;
   let streamHeartbeat: NodeJS.Timeout | null = null;
+  let rawThinkOpen = false;
+  let rawThinkCarry = "";
+  const ingestRawThinkingChunk = (chunk: string) => {
+    const input = `${rawThinkCarry}${String(chunk || "")}`;
+    rawThinkCarry = "";
+    if (!input) return;
+
+    let cursor = 0;
+    const lowerInput = input.toLowerCase();
+    while (cursor < input.length) {
+      if (!rawThinkOpen) {
+        const openIdx = lowerInput.indexOf("<think>", cursor);
+        if (openIdx < 0) {
+          const tail = input.slice(Math.max(cursor, input.length - 6));
+          if ("<think>".startsWith(tail.toLowerCase())) rawThinkCarry = tail;
+          return;
+        }
+        cursor = openIdx + "<think>".length;
+        rawThinkOpen = true;
+        continue;
+      }
+
+      const closeIdx = lowerInput.indexOf("</think>", cursor);
+      if (closeIdx < 0) {
+        const segment = input.slice(cursor);
+        if (!segment) return;
+        const keep = segment.slice(Math.max(0, segment.length - 8));
+        const body = segment.slice(0, Math.max(0, segment.length - keep.length));
+        if (body) streamedThinking += body;
+        if ("</think>".startsWith(keep.toLowerCase())) {
+          rawThinkCarry = keep;
+        } else if (keep) {
+          streamedThinking += keep;
+        }
+        return;
+      }
+
+      const body = input.slice(cursor, closeIdx);
+      if (body) streamedThinking += body;
+      cursor = closeIdx + "</think>".length;
+      rawThinkOpen = false;
+    }
+  };
   const editingState: {
     active: boolean;
-    file: string;
+    files: string[];
     phase: "stream" | "apply";
     timer: NodeJS.Timeout | null;
+    lastLogKey: string;
   } = {
     active: false,
-    file: "",
+    files: [],
     phase: "stream",
     timer: null,
+    lastLogKey: "",
   };
   let requestWorkspaceRender: (() => void) | null = null;
+  const summarizeEditingFiles = (files: string[]) => {
+    if (!files.length) return "";
+    if (files.length === 1) return files[0];
+    if (files.length === 2) return `${files[0]} | ${files[1]}`;
+    return `${files[0]} | ${files[1]} (+${files.length - 2} more)`;
+  };
   const getEditingStatusText = () => {
-    if (!editingState.active || !editingState.file) return "";
-    return `Currently Editing ${editingState.file}`;
+    if (!editingState.active || !editingState.files.length) return "";
+    if (editingState.files.length === 1) return `Currently Editing ${editingState.files[0]}`;
+    return `Currently Editing ${editingState.files.length} files: ${summarizeEditingFiles(editingState.files)}`;
   };
   const renderEditingState = () => {
     const text = getEditingStatusText();
     if (!text) return;
     if (MISSION_BOARD) {
+      const phaseVerb = editingState.phase === "apply" ? "Applying" : "Editing";
+      const logKey = `${editingState.phase}:${editingState.files.join("\n")}`;
+      const logText = `${phaseVerb} ${summarizeEditingFiles(editingState.files)}`;
+      const nextLog = editingState.lastLogKey === logKey ? undefined : logText;
+      editingState.lastLogKey = logKey;
       MISSION_BOARD.update({
         status: editingState.phase === "apply" ? "APPLYING CHANGES" : "STREAM EDITING",
         status_style: editingState.phase === "apply" ? THEME.accent : THEME.warning,
         live_field: editingState.phase === "apply" ? "APPLY" : "STREAM EDIT",
         live_text: text,
-        // Only log once per file/phase to prevent infinite list of spinner frames
-        log: `${editingState.phase === "apply" ? "Applying" : "Editing"} ${editingState.file}`,
+        // Only log when the tracked file set changes.
+        log: nextLog,
       });
       return;
     }
@@ -1874,9 +2074,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const startEditingSpinner = (file: string, phase: "stream" | "apply") => {
     const nextFile = String(file || "").trim();
     if (!nextFile) return;
-    editingState.file = nextFile;
+    editingState.files = [nextFile];
     editingState.phase = phase;
     editingState.active = true;
+    editingState.lastLogKey = "";
     if (editingState.timer) return;
     renderEditingState();
     editingState.timer = setInterval(() => {
@@ -1886,8 +2087,15 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const updateEditingSpinner = (file: string, phase: "stream" | "apply") => {
     const nextFile = String(file || "").trim();
     if (!nextFile) return;
-    editingState.file = nextFile;
+    const phaseChanged = editingState.phase !== phase;
     editingState.phase = phase;
+    if (phaseChanged) {
+      editingState.files = [];
+      editingState.lastLogKey = "";
+    }
+    if (!editingState.files.includes(nextFile)) {
+      editingState.files.push(nextFile);
+    }
     if (!editingState.active) {
       startEditingSpinner(nextFile, phase);
       return;
@@ -1896,8 +2104,9 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   };
   const stopEditingSpinner = () => {
     editingState.active = false;
-    editingState.file = "";
+    editingState.files = [];
     editingState.phase = "stream";
+    editingState.lastLogKey = "";
     if (editingState.timer) {
       clearInterval(editingState.timer);
       editingState.timer = null;
@@ -1907,15 +2116,18 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   let announcedThought = false;
   let announcedPlan = false;
   let announcedResponse = false;
+  let streamedResponsePrinted = false;
+  let bufferMarkdownResponse = false;
   let lastPrintedPlanLen = 0;
   let lastPrintedResponseLen = 0;
   let lastPrintedThoughtLen = 0;
   const printStreamDelta = () => {
     if (streamUiDisabledForTurn || isPromptInputActive()) return;
     const split = extractThinkBlocks(streamedResponse || "");
-    // Favor raw 'thinking' or extracted '<think>' over schema 'thought'
-    const hasRaw = Boolean(streamedThinking.trim() || split.thinking.trim());
-    const thoughtToPrint = hasRaw ? [streamedThinking.trim(), split.thinking.trim()].filter(Boolean).join("\n") : streamedThought.trim();
+    // Show thinking whenever the model emits it, even if think_mode is off.
+    const thoughtToPrint = [streamedThinking.trim(), split.thinking.trim(), streamedThought.trim()]
+      .filter(Boolean)
+      .join("\n");
     const mergedThought = thoughtToPrint.trim();
     const displayResponse = stripResponseWrapperText(sanitizeStreamFieldPreview("response", split.response || ""));
     const displayThought = sanitizeStreamFieldPreview("thought", mergedThought);
@@ -1925,15 +2137,15 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       if (MISSION_BOARD) {
         lastPrintedThoughtLen = displayThought.length;
       } else {
-      const alreadyAnnounced = announcedThought || (missionData && (missionData as any).thought_announced);
-      if (!alreadyAnnounced) {
-        process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.magenta("AGENT THINKING")}${chalk.dim("--------")}\n`);
-        announcedThought = true;
-        if (missionData) (missionData as any).thought_announced = true;
-      }
-      const delta = displayThought.slice(lastPrintedThoughtLen);
-      process.stdout.write(chalk.italic(chalk.gray(delta)));
-      lastPrintedThoughtLen = displayThought.length;
+        const alreadyAnnounced = announcedThought || (missionData && (missionData as any).thought_announced);
+        if (!alreadyAnnounced) {
+          process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.magenta("AGENT THINKING")}${chalk.dim("--------")}\n`);
+          announcedThought = true;
+          if (missionData) (missionData as any).thought_announced = true;
+        }
+        const delta = displayThought.slice(lastPrintedThoughtLen);
+        process.stdout.write(chalk.italic(chalk.gray(delta)));
+        lastPrintedThoughtLen = displayThought.length;
       }
     }
 
@@ -1943,20 +2155,32 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       if (MISSION_BOARD) {
         lastPrintedPlanLen = displayPlan.length;
       } else {
-      const alreadyAnnounced = announcedPlan || (missionData && (missionData as any).plan_announced);
-      if (!alreadyAnnounced) {
-        process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.cyan("AGENT PLAN")}${chalk.dim("--------")}\n`);
-        announcedPlan = true;
-        if (missionData) (missionData as any).plan_announced = true;
-      }
-      const delta = displayPlan.slice(lastPrintedPlanLen);
-      process.stdout.write(chalk.cyan(delta));
-      lastPrintedPlanLen = displayPlan.length;
+        const alreadyAnnounced = announcedPlan || (missionData && (missionData as any).plan_announced);
+        if (!alreadyAnnounced) {
+          process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.cyan("AGENT PLAN")}${chalk.dim("--------")}\n`);
+          announcedPlan = true;
+          if (missionData) (missionData as any).plan_announced = true;
+        }
+        const delta = displayPlan.slice(lastPrintedPlanLen);
+        process.stdout.write(chalk.cyan(delta));
+        lastPrintedPlanLen = displayPlan.length;
       }
     }
 
     // Print new response deltas
     if (displayResponse.length > lastPrintedResponseLen) {
+      const nextDelta = displayResponse.slice(lastPrintedResponseLen);
+      const shouldBufferMarkdown =
+        bufferMarkdownResponse ||
+        hasLikelyMarkdownSyntax(displayResponse) ||
+        hasPotentialMarkdownPrefix(displayResponse) ||
+        hasPotentialMarkdownPrefix(nextDelta);
+      if (shouldBufferMarkdown) {
+        // Buffer markdown-heavy responses and render once at the end via console.print.
+        bufferMarkdownResponse = true;
+        lastPrintedResponseLen = displayResponse.length;
+        return;
+      }
       const alreadyAnnounced = announcedResponse || (missionData && (missionData as any).response_announced);
       if (!alreadyAnnounced) {
         // Ensure a newline before header if we already had a thought or plan
@@ -1967,6 +2191,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       }
       const delta = displayResponse.slice(lastPrintedResponseLen);
       process.stdout.write(delta);
+      streamedResponsePrinted = true;
       lastPrintedResponseLen = displayResponse.length;
     }
   };
@@ -1975,8 +2200,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     if (streamUiDisabledForTurn || isPromptInputActive()) return;
     renderThrottle.request();
   };
+  let markStreamActivity: (() => void) | undefined;
   const streamCallback = (chunk: string) => {
     try {
+      markStreamActivity?.();
+      ingestRawThinkingChunk(chunk);
       streamBuffer.push(chunk);
       streamChunkCount += 1;
       if (streamChunkCount === 1) {
@@ -2001,6 +2229,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
       if (observed.deltas.thinking) streamedThinking += observed.deltas.thinking;
       if (observed.deltas.ask_user) streamedAskUser += observed.deltas.ask_user;
+      if (!waitingForUserLocked && streamedAskUser.trim()) {
+        waitingForUserLocked = true;
+        askUserLogged = false;
+        stopEditingSpinner();
+      }
 
       const snapshot = streamObserver.snapshot();
 
@@ -2027,18 +2260,9 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         streamedThought = splitStream.thinking;
       }
 
-      if (observed.fileEdits.length) {
+      if (observed.fileEdits.length && !waitingForUserLocked) {
         for (const filePath of observed.fileEdits) {
-          const label = `Currently Editing ${filePath}`;
           updateEditingSpinner(filePath, "stream");
-          if (MISSION_BOARD) {
-            // Only update status, don't log every chunk to avoid history spam
-            MISSION_BOARD.update({
-              status: "STREAM EDITING",
-              status_style: THEME.accent,
-              live_text: label,
-            });
-          }
         }
       }
 
@@ -2047,11 +2271,22 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       }
 
       if (MISSION_BOARD) {
-        // If we are editing, let the spinner handle the live area
-        if (observed.fileEdits.length === 0) {
+        // If we are editing, let the spinner handle the live area (unless waiting for user).
+        if (observed.fileEdits.length === 0 || waitingForUserLocked) {
+          const askUserPreview = sanitizeStreamFieldPreview("ask_user", streamedAskUser);
+          if (waitingForUserLocked) {
+            MISSION_BOARD.update({
+              status: "WAITING FOR USER",
+              status_style: THEME.warning,
+              live_text: askUserPreview || "Awaiting your response...",
+              log: !askUserLogged && askUserPreview ? `AI question: ${askUserPreview.slice(0, 220)}` : undefined,
+            });
+            if (askUserPreview) askUserLogged = true;
+            return;
+          }
           const liveText = streamedAskUser
-            ? sanitizeStreamFieldPreview("ask_user", streamedAskUser)
-            : streamedThought
+            ? askUserPreview
+            : ((streamedThinking || streamedThought))
               ? "Thinking..."
               : streamedPlan
                 ? "Planning..."
@@ -2059,10 +2294,14 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
                   ? "Responding..."
                   : "Streaming...";
 
+          const liveMergedThought = [streamedThinking, streamedThought, String(snapshot.thinking || ""), String(snapshot.thought || "")]
+            .map((x) => String(x || "").trim())
+            .find(Boolean) || "";
+
           MISSION_BOARD.update({
             status: streamedAskUser ? "WAITING FOR USER" : "STREAMING",
             status_style: streamedAskUser ? THEME.warning : THEME.accent,
-            thought: String(streamedThought || snapshot.thought || ""),
+            thought: liveMergedThought,
             tasks: parsePlanTasks(streamedPlan || snapshot.plan || ""),
             live_text: liveText,
             log: observed.deltas.ask_user ? `AI question: ${String(streamedAskUser).slice(-220)}` : undefined,
@@ -2092,8 +2331,9 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   let responseText = "";
   let rawModelThinking = "";
   let usage = { input_tokens: 0, output_tokens: 0 };
-  const streamRetryCount = Number(cfg.get("stream_retry_count", 1));
-  const streamTimeoutMs = Number(cfg.get("stream_timeout_ms", 300_000));
+  const disableTimeoutRetry = Boolean(cfg.get("disable_timeout_retry", false));
+  const streamRetryCount = disableTimeoutRetry ? 0 : Number(cfg.get("stream_retry_count", 1));
+  const streamTimeoutMs = Number(cfg.get("stream_timeout_ms", false));
   try {
     printActivity(`Talking to provider: ${providerName}`);
     eventBus.emit({
@@ -2119,16 +2359,19 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     const streamExecution = await callWithStreamRecovery({
       streamRetryCount,
       streamTimeoutMs,
-      run: async (streamEnabled: boolean) => {
+      run: async (streamEnabled: boolean, markActivity?: () => void) => {
+        markStreamActivity = markActivity;
         const attemptTask = {
           ...(task as TaskPayload),
           _stream_enabled: streamEnabled,
         } as TaskPayload;
-        return provider.call(prompt, attemptTask, {
+        return await provider.call(prompt, attemptTask, {
           streamCallback: streamEnabled ? streamCallback : undefined,
+          onStreamActivity: streamEnabled ? markActivity : undefined,
         });
       },
     });
+    markStreamActivity = undefined;
     streamExecution.health.throttled_renders = renderThrottle.getThrottledCount();
     const result = streamExecution.result;
     responseText = result.text || "";
@@ -2183,6 +2426,12 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   } catch (error) {
     stopEditingSpinner();
     if (providerName === "ollama") invalidateOllamaContext();
+    // Ensure any live spinner/logUpdate line is cleared before printing error text.
+    stopThinking();
+    if (!MISSION_BOARD) {
+      process.stdout.write("\n");
+      printPanel(String(error), "Provider Error", THEME.error, true);
+    }
     printError(`Error calling provider: ${String(error)}`);
     if (MISSION_BOARD) {
       MISSION_BOARD.update({
@@ -2197,7 +2446,6 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       message: `Provider error: ${String(error)}`,
       success: false,
     });
-    stopThinking(); // Call stopThinking in catch block
     return null;
   } finally {
     stopThinking(); // Call stopThinking in finally block
@@ -2342,10 +2590,13 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const askUserQuestions = normalizeQuestionList(data.ask_user_questions ?? data.ask_user);
 
   if (MISSION_BOARD) {
+    const parsedMergedThought = [String(data.thought || ""), streamedThinking, streamedThought, String(rawModelThinking || "")]
+      .map((x) => String(x || "").trim())
+      .find(Boolean) || "";
     MISSION_BOARD.update({
       status: "PARSING",
       status_style: THEME.secondary,
-      thought: String(data.thought || streamedThought || rawModelThinking || ""),
+      thought: parsedMergedThought,
       tasks: parsePlanTasks(data.plan),
       log: "Model response parsed.",
     });
@@ -2501,7 +2752,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
   // Per user request: prioritize raw reasoning (Ollama/tags) over schema thoughts.
   const rawThinking = [rawModelThinking.trim(), thinkSplit.thinking.trim()].filter(Boolean).join("\n").trim();
-  const mergedThought = rawThinking || structuredThought || streamedThought.trim();
+  const mergedThought = rawThinking || structuredThought || streamedThinking.trim() || streamedThought.trim();
   const thoughtMsg = redactPromptLeak(mergedThought);
   if (!responseMsg.trim()) {
     responseMsg = hasToolIntent(data)
@@ -2599,12 +2850,12 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
 
   const showUi = !Boolean(MISSION_BOARD);
-  if (Boolean(cfg.get("think_mode", false)) && !isFast) {
+  if (thoughtMsg.trim() && !isFast) {
     displayThinking(rawModelThinking, thoughtMsg, showUi, Boolean(MISSION_BOARD));
   }
   // If response was already streamed to stdout, just add a newline separator.
   // Otherwise (non-streaming or mission mode), print it.
-  const alreadyStreamed = announcedStreaming && lastPrintedResponseLen > 0;
+  const alreadyStreamed = announcedStreaming && streamedResponsePrinted && lastPrintedResponseLen > 0;
   if (responseMsg) {
     if (alreadyStreamed) {
       process.stdout.write("\n");
@@ -2993,17 +3244,17 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     return handle(text, safeArgs, nextData);
   }
 }
-export async function missionLoop(text: string, args: HandleArgs) {
-  MISSION_BOARD = new MissionBoard("Agent CLI Mission Board");
+export async function missionLoop(text: string, args: HandleArgs, context: AgentContext = DEFAULT_CONTEXT) {
+  const ui = context.ui;
+  MISSION_BOARD = new MissionBoard("Agent CLi Mission Board");
   setMissionActivitySink((activityText: string) => {
-    if (!MISSION_BOARD) return;
-    MISSION_BOARD.update({
+    ui.updateMissionStatus({
       status: "RUNNING TOOLS",
       status_style: THEME.accent,
       live_text: activityText,
     });
   });
-  MISSION_BOARD.update({
+  ui.updateMissionStatus({
     status: "MISSION START",
     status_style: THEME.accent,
     log: `Objective: ${text}`,
@@ -3118,6 +3369,7 @@ export async function missionLoop(text: string, args: HandleArgs) {
         response_emitted: Boolean((data as Record<string, unknown>).__response_emitted),
       };
       if (MISSION_BOARD) {
+        MISSION_BOARD.setProgressDone(stepCount);
         MISSION_BOARD.update({
           status: "MISSION COMPLETE",
           status_style: THEME.success,
@@ -3182,6 +3434,9 @@ export async function missionLoop(text: string, args: HandleArgs) {
       }
       const summary = actionParts.join(" | ") || "Action taken";
       stepSummaries.push(`Step ${stepCount}: ${summary}`);
+      if (MISSION_BOARD) {
+        MISSION_BOARD.setProgressDone(stepCount);
+      }
 
       stepCount += 1;
       (missionData as Record<string, unknown>).step = stepCount;

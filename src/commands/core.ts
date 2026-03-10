@@ -5,10 +5,12 @@ import { registry } from "./registry";
 import { cfg, MODEL_CONTEXT_WINDOWS } from "../config";
 import { clearScreen, printError, printInfo, printPanel, printSuccess, printWarning } from "../ui/console";
 import logUpdate from "log-update";
-import { estimateTokens, load, compactSession } from "../memory";
+import { load, compactSession, estimateTokens } from "../memory";
 import { undoLastApply } from "../applier";
+import { printImage } from "../ui/console";
 import { printSessionStats } from "../ui/console";
 import { intel } from "../core/intelligence";
+import { printConfigHelp } from "./config";
 let PREV_CWD = process.cwd();
 
 
@@ -21,10 +23,15 @@ function estimateContextWindow(provider: string, model: string) {
   return Number(MODEL_CONTEXT_WINDOWS[model] || 0);
 }
 
-registry.register("/help", "Show available commands")(async () => {
+registry.register("/help", "Show available commands")(async (_, args) => {
+  if (args && args.length > 1 && args[1].toLowerCase() === "config") {
+    printConfigHelp();
+    return true;
+  }
+
   const categories: Record<string, Set<string>> = {
-    General: new Set(["/help", "/exit", "/cls", "/cd", "/read", "/ls", "/tree", "/undo", "/see", "/search", "/list_diff"]),
-    "AI & Context": new Set(["/model", "/provider", "/think", "/compact", "/cost", "/unlimited", "/status"]),
+    General: new Set(["/help", "/commands", "/exit", "/cls", "/cd", "/read", "/ls", "/tree", "/undo", "/see", "/search", "/list_diff"]),
+    "AI & Context": new Set(["/model", "/provider", "/think", "/compact", "/cost", "/unlimited", "/status", "/skills", "/assist"]),
     "Git Integration": new Set(["/diff", "/review", "/commit", "/pr"]),
     "Intelligence & Ops": new Set(["/index", "/lint", "/scan", "/intel"]),
     Configuration: new Set(["/config", "/timeout"]),
@@ -53,7 +60,7 @@ registry.register("/help", "Show available commands")(async () => {
     grouped.get(bucket)?.push([cmd, desc]);
   }
 
-  let text = "# Agent CLI - Command Reference\n\n_Auto-generated from the command registry._\n\n";
+  let text = "# Agent CLi - Command Reference\n\n_Auto-generated from the command registry._\n\n";
   for (const category of ["General", "AI & Context", "Git Integration", "Configuration", "Modes", "Session & Dev", "Runtime", "Other"]) {
     const rows = grouped.get(category) || [];
     if (!rows.length) continue;
@@ -66,8 +73,13 @@ registry.register("/help", "Show available commands")(async () => {
     text += "\n";
   }
   text += "## Shell\n- `!<command>`: Execute shell commands inline (e.g., `!git status`)\n- `F6`: Open IDE (VS Code)\n\n";
-  text += "## Project\n- **AGENTS.md**: Place in project root for custom instructions\n";
-  printPanel(text, "Agent CLI - Help", "blue", true);
+  text += "## Assist Workflows\n";
+  text += "- `/assist explain|fix|tests|docs|review|commit <target>`: Copilot-inspired coding workflows\n\n";
+  text += "## Skills & Project\n";
+  text += "- `/skills list|init|where`: Manage local CLI skills\n";
+  text += "- `/init`: Generate `AGENTS.md` in project root\n";
+  text += "- **AGENTS.md**: Project-specific instructions auto-loaded by the agent\n";
+  printPanel(text, "Agent CLi - Help", "blue", true);
   return true;
 });
 
@@ -296,6 +308,21 @@ registry.register("/ls", "List directory contents")((_, args) => {
     .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
     .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`);
   printPanel(items.length ? items.join("\n") : "(empty)", p, "cyan");
+  return true;
+});
+
+registry.register("/image", "Display an image in the console")((_, args) => {
+  if (args.length < 2) {
+    printError("Usage: /image <path/to/image.png>");
+    return true;
+  }
+  const target = args.slice(1).join(" ");
+  const p = path.resolve(process.cwd(), target);
+  if (!fs.existsSync(p) || !fs.statSync(p).isFile()) {
+    printError(`Image file not found: ${target}`);
+    return true;
+  }
+  printImage(p).catch(err => printError(String(err)));
   return true;
 });
 

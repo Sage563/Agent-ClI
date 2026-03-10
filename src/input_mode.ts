@@ -3,6 +3,7 @@ import { getProjectFiles } from "./file_browser";
 import { cfg } from "./config";
 import { THEME, console as consoleUi, setupScrollRegion, getToolbar, themeColor, setPromptInputActive } from "./ui/console";
 import { openContextPicker } from "./ui/context_picker";
+import { registry } from "./commands/registry";
 import chalk from "chalk";
 import readline from "readline";
 import logUpdate from "log-update";
@@ -29,6 +30,38 @@ function wrapLine(line: string, width: number) {
   return out.length ? out : [""];
 }
 
+function stripAnsi(text: string) {
+  return String(text || "").replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
+}
+
+function buildInputHint(inputBuffer: string) {
+  const text = String(inputBuffer || "").trim();
+  if (!text) {
+    return "Tip: /assist fix <issue> | /config -h | @ attach file | ! run shell command";
+  }
+  if (text.startsWith("/")) {
+    const cmd = String(text.split(/\s+/)[0] || "").toLowerCase();
+    if (registry.hasCommand(cmd)) {
+      if (cmd === "/skills") {
+        return "Skills: /skills list | /skills init <name> | /skills where";
+      }
+      return `Command ready: ${cmd}`;
+    }
+    const suggestions = registry.suggestCommands(cmd, 4);
+    if (suggestions.length) {
+      return `Unknown command. Try: ${suggestions.join("  ")}`;
+    }
+    return "Unknown command. Use /commands or /help.";
+  }
+  if (text.startsWith("!")) {
+    return "Shell mode: the command after ! executes in your terminal";
+  }
+  if (text.includes("@")) {
+    return "Context mode: @path attaches files to the prompt";
+  }
+  return "Enter submits. Use /assist for guided workflows.";
+}
+
 function render(promptText: string, inputBuffer: string, cursorOffset: number) {
   if (lastInputRenderRows > 1) {
     process.stdout.write(`\x1b[${lastInputRenderRows - 1}A`);
@@ -48,12 +81,13 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number) {
   const promptStyled = chalk.bold(themeColor(THEME.primary)(promptText));
   const promptLen = promptText.length;
   const cols = Math.max(20, process.stdout.columns || 80);
+  const hintText = buildInputHint(inputBuffer);
   const cursorPos = Math.max(0, inputBuffer.length - cursorOffset);
   const logicalLines = inputBuffer.split("\n");
   const cursor = cursorLineCol(inputBuffer, cursorPos);
   const rows = Math.max(10, process.stdout.rows || 24);
   // Reserve bottom rows so prompt input stays above the status toolbar.
-  const inputRows = Math.max(1, rows - 3);
+  const inputRows = Math.max(1, rows - (hintText ? 4 : 3));
   const firstPrefixLen = promptLen;
   const continuePrefixLen = promptLen;
   const firstWidth = Math.max(1, cols - firstPrefixLen - 1);
@@ -109,6 +143,12 @@ function render(promptText: string, inputBuffer: string, cursorOffset: number) {
 
   // Draw bottom toolbar
   process.stdout.write("\x1b7"); // Save cursor pos (DEC, more compatible)
+  process.stdout.write(`\x1b[${Math.max(1, rows - 1)};1H`); // row above toolbar
+  process.stdout.write("\x1b[2K\x1b[G");
+  if (hintText) {
+    const clipped = stripAnsi(hintText).slice(0, Math.max(0, cols - 1));
+    process.stdout.write(chalk.dim(clipped));
+  }
   process.stdout.write(`\x1b[${rows};1H`); // move to bottom left
   process.stdout.write("\x1b[2K\x1b[G"); // clear toolbar row before redraw
   process.stdout.write(getToolbar()); // draw toolbar

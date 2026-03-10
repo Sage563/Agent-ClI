@@ -6,8 +6,40 @@ import { BUILTIN_PROVIDERS } from "../providers/catalog";
 const GENERATION_KEYS = new Set(["temperature", "max_tokens", "max_output_tokens", "num_ctx", "top_p", "top_k", "num_predict", "repeat_penalty"]);
 const STREAM_KEYS = new Set(["stream", "stream_print"]);
 const GLOBAL_STREAM_KEYS = new Set(["stream_global", "stream_print_global"]);
-const NUMERIC_RUNTIME_KEYS = new Set(["stream_timeout_ms", "stream_retry_count", "stream_render_fps", "mission_render_fps", "command_timeout_ms"]);
-const BOOLEAN_RUNTIME_KEYS = new Set(["command_log_enabled", "env_bridge_enabled", "strict_edit_requires_full_access"]);
+const NUMERIC_RUNTIME_KEYS = new Set([
+  "stream_timeout_ms",
+  "stream_retry_count",
+  "stream_render_fps",
+  "mission_render_fps",
+  "command_timeout_ms",
+  "max_requests",
+  "auto_compact_threshold_pct",
+  "auto_compact_keep_recent_turns",
+]);
+const BOOLEAN_RUNTIME_KEYS = new Set([
+  "command_log_enabled",
+  "env_bridge_enabled",
+  "strict_edit_requires_full_access",
+  "disable_timeout_retry",
+  "image_to_ascii",
+  "planning_mode",
+  "fast_mode",
+  "mission_mode",
+  "voice_mode",
+  "newline_support",
+  "visibility_allowed",
+  "auto_reload_session",
+  "web_browsing_allowed",
+  "see_project_mode",
+  "include_history",
+  "auto_compact_enabled",
+  "onboarding_completed",
+]);
+const ENUM_KEYS = new Map<string, string[]>([
+  ["run_policy", ["ask", "always", "never"]],
+  ["theme_mode", ["dark", "white", "follow_windows"]],
+  ["access_scope", ["limited", "full_desktop"]],
+]);
 const THEME_KEYS = new Set(["primary", "secondary", "accent", "success", "warning", "error", "dim", "bg"]);
 const VALID_PROVIDERS: string[] = [...BUILTIN_PROVIDERS];
 const CONFIG_HELP_FLAGS = new Set(["-h", "--help", "help"]);
@@ -18,27 +50,51 @@ function mask(key?: string) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function printConfigHelp() {
+function parseBooleanValue(raw: string) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (["true", "1", "on", "enable", "enabled", "yes"].includes(v)) return true;
+  if (["false", "0", "off", "disable", "disabled", "no"].includes(v)) return false;
+  return null;
+}
+
+export function printConfigHelp() {
   let text = "## Usage\n";
   text += "- `/config`: Show current configuration snapshot\n";
+  text += "- `/config all`: Show full config JSON (API keys masked)\n";
   text += "- `/config -h`: Show this help\n";
   text += "- `/config <key>`: Show current value for a key\n";
   text += "- `/config <key> <value>`: Set key value\n";
-  text += "\n## Providers\n";
+  text += "\n## Providers and Models\n";
   text += `- Valid providers: ${VALID_PROVIDERS.join(", ")}\n`;
   text += "- API keys: `<provider>_api_key` (example: `openai_api_key`)\n";
   text += "- Active provider: `/provider <name>`\n";
+  text += "- Set active model for active provider: `/model <model_name>`\n";
+  text += "\n### Example Models you can set per provider:\n";
+  text += "- **openai**: `gpt-4o`, `o1-preview`, `gpt-4-turbo`\n";
+  text += "- **anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`, `claude-3-haiku-20240307`\n";
+  text += "- **gemini**: `gemini-2.5-flash`, `gemini-2.0-pro-exp-02-05`\n";
+  text += "- **ollama**: `qwen3:14b`, `llama3.3:70b`, `deepseek-r1:14b`\n";
+  text += "- **deepseek**: `deepseek-chat`, `deepseek-coder`\n";
+  text += "- **hf**: `Qwen/Qwen2.5-72B-Instruct`, `microsoft/Phi-3-mini-4k-instruct`\n";
   text += "\n## Core Keys\n";
   text += "- `endpoint`\n";
   text += "- `run_policy` (`ask`, `always`, `never`)\n";
   text += "- `budget` (number)\n";
+  text += "- `max_requests` (number, `0` = unlimited)\n";
   text += "- `effort` (`low`, `medium`, `high`)\n";
   text += "- `reasoning` (`low`, `standard`, `high`, `extra`)\n";
   text += "- `mcp_enabled` (`true`/`false`)\n";
+  text += "- `planning_mode`, `fast_mode`, `mission_mode`, `voice_mode` (`true`/`false`)\n";
+  text += "- `newline_support`, `visibility_allowed`, `auto_reload_session`, `web_browsing_allowed`, `see_project_mode` (`true`/`false`)\n";
+  text += "- `include_history`, `auto_compact_enabled`, `onboarding_completed` (`true`/`false`)\n";
+  text += "- `theme_mode` (`dark`, `white`, `follow_windows`)\n";
+  text += "- `access_scope` (`limited`, `full_desktop`)\n";
   text += "- `env_bridge_enabled` (`true`/`false`)\n";
   text += "- `command_log_enabled` (`true`/`false`)\n";
   text += "- `strict_edit_requires_full_access` (`true`/`false`)\n";
-  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `mission_render_fps`, `command_timeout_ms` (set `0` for unlimited)\n";
+  text += "- `disable_timeout_retry` (`true`/`false`)\n";
+  text += "- `image_to_ascii` (`true`/`false`)\n";
+  text += "- `stream_timeout_ms`, `stream_retry_count`, `stream_render_fps`, `mission_render_fps`, `command_timeout_ms`, `auto_compact_threshold_pct`, `auto_compact_keep_recent_turns` (`stream_timeout_ms=false` disables stream timeout)\n";
   text += "\n## Generation Keys (number)\n";
   text += `- ${Array.from(GENERATION_KEYS).join(", ")}\n`;
   text += "\n## Stream Keys\n";
@@ -51,17 +107,35 @@ function printConfigHelp() {
   text += "- `ollama_num_ctx`\n";
   text += "\n## Examples\n";
   text += "- `/config run_policy always`\n";
+  text += "- `/config max_requests 20`\n";
   text += "- `/config budget 20`\n";
   text += "- `/config temperature 0.2`\n";
+  text += "- `/config stream_timeout_ms false`\n";
   text += "- `/config theme.primary cyan`\n";
   text += "- `/config stream true`\n";
   text += "- `/config stream_global false`\n";
+  text += "- `/model claude-3-5-sonnet-20241022`\n";
+  text += "- `/provider openai`\n";
   printPanel(text, "Config Help");
 }
 
 registry.register("/config", "View or set configuration. Usage: /config [key] [value]")((_, args) => {
   if (args.length >= 2 && CONFIG_HELP_FLAGS.has(args[1].toLowerCase())) {
     printConfigHelp();
+    return true;
+  }
+
+  if (args.length >= 2 && args[1].toLowerCase() === "all") {
+    const raw = { ...(cfg.config as Record<string, unknown>) };
+    const providers = (raw.providers || {}) as Record<string, unknown>;
+    const masked = {
+      ...raw,
+      providers,
+      api_keys: Object.fromEntries(
+        VALID_PROVIDERS.map((providerName) => [providerName, mask(cfg.getApiKey(providerName))]),
+      ),
+    };
+    printPanel(`\`\`\`json\n${JSON.stringify(masked, null, 2)}\n\`\`\``, "Config (All)", "blue", true);
     return true;
   }
 
@@ -90,7 +164,16 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
     text += `- planning_mode: ${cfg.isPlanningMode()}\n`;
     text += `- mission_mode: ${cfg.isMissionMode()}\n`;
     text += `- voice_mode: ${cfg.isVoiceMode()}\n`;
+    text += `- newline_support: ${cfg.isNewlineSupport()}\n`;
+    text += `- web_browsing_allowed: ${cfg.isWebBrowsingAllowed()}\n`;
+    text += `- see_project_mode: ${cfg.isSeeMode()}\n`;
+    text += `- mcp_enabled: ${cfg.isMcpEnabled()}\n`;
+    text += `- include_history: ${String(cfg.get("include_history", false))}\n`;
+    text += `- auto_compact_enabled: ${String(cfg.get("auto_compact_enabled", true))}\n`;
+    text += `- theme_mode: ${String(cfg.get("theme_mode", "dark"))}\n`;
+    text += `- access_scope: ${String(cfg.get("access_scope", "limited"))}\n`;
     text += `- max_budget: $${cfg.getBudget().toFixed(2)}\n`;
+    text += `- max_requests: ${String(cfg.get("max_requests", 0))}\n`;
     printPanel(text, "Config");
     return true;
   }
@@ -117,6 +200,12 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
       printInfo(`max_budget: $${cfg.getBudget().toFixed(2)}`);
     } else if (key === "run_policy") {
       printInfo(`run_policy: ${cfg.getRunPolicy()}`);
+    } else if (key === "effort") {
+      printInfo(`effort: ${cfg.getEffortLevel()}`);
+    } else if (key === "reasoning") {
+      printInfo(`reasoning: ${cfg.getReasoningLevel()}`);
+    } else if (ENUM_KEYS.has(key)) {
+      printInfo(`${key}: ${String(cfg.get(key, "(default)"))}`);
     } else if (NUMERIC_RUNTIME_KEYS.has(key) || BOOLEAN_RUNTIME_KEYS.has(key)) {
       printInfo(`${key}: ${String(cfg.get(key, "(default)"))}`);
     } else if (key === "endpoint") {
@@ -184,29 +273,45 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
   }
 
   if (NUMERIC_RUNTIME_KEYS.has(key)) {
+    if (key === "stream_timeout_ms") {
+      const boolLike = parseBooleanValue(value);
+      if (boolLike === false) {
+        cfg.set(key, false);
+        printSuccess("Set stream_timeout_ms = false (disabled).");
+        return true;
+      }
+    }
     const parsed = Number(value);
     if (Number.isNaN(parsed)) {
       printError(`${key} must be a number`);
       return true;
     }
-    cfg.set(key, parsed);
-    printSuccess(`Set ${key} = ${parsed}`);
+    const normalized = key === "max_requests" ? Math.max(0, Math.floor(parsed)) : parsed;
+    cfg.set(key, normalized);
+    printSuccess(`Set ${key} = ${normalized}`);
     return true;
   }
 
   if (BOOLEAN_RUNTIME_KEYS.has(key)) {
-    const v = value.toLowerCase();
-    if (["true", "1", "on", "enable", "enabled", "yes"].includes(v)) {
-      cfg.set(key, true);
-      printSuccess(`Set ${key} = true`);
-      return true;
-    }
-    if (["false", "0", "off", "disable", "disabled", "no"].includes(v)) {
-      cfg.set(key, false);
-      printSuccess(`Set ${key} = false`);
+    const parsed = parseBooleanValue(value);
+    if (parsed !== null) {
+      cfg.set(key, parsed);
+      printSuccess(`Set ${key} = ${parsed}`);
       return true;
     }
     printError(`${key} must be true/false`);
+    return true;
+  }
+
+  if (ENUM_KEYS.has(key)) {
+    const next = value.toLowerCase();
+    const allowed = ENUM_KEYS.get(key) || [];
+    if (!allowed.includes(next)) {
+      printError(`${key} must be one of: ${allowed.join(", ")}`);
+      return true;
+    }
+    cfg.set(key, next);
+    printSuccess(`Set ${key} = ${next}`);
     return true;
   }
 
@@ -219,16 +324,6 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
     cfg.setThemeColor(colorKey, value);
     reloadTheme();
     printSuccess(`Set theme.${colorKey} = ${value}`);
-    return true;
-  }
-
-  if (key === "run_policy") {
-    if (["ask", "always", "never"].includes(value)) {
-      cfg.setRunPolicy(value as any);
-      printSuccess(`Set run policy to: ${value}`);
-    } else {
-      printError("run_policy must be: ask, always, or never");
-    }
     return true;
   }
 
@@ -294,7 +389,7 @@ registry.register("/config", "View or set configuration. Usage: /config [key] [v
 
   printWarning(`Unknown config key: ${key}`);
   printInfo(
-    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, mission_render_fps, command_timeout_ms, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, theme.*, run_policy, budget",
+    "Configurable keys: *_api_key, endpoint, temperature, max_tokens, num_ctx, top_p, stream, stream_print, stream_global, stream_print_global, stream_timeout_ms, stream_retry_count, stream_render_fps, mission_render_fps, command_timeout_ms, max_requests, auto_compact_threshold_pct, auto_compact_keep_recent_turns, command_log_enabled, env_bridge_enabled, strict_edit_requires_full_access, disable_timeout_retry, image_to_ascii, planning_mode, fast_mode, mission_mode, voice_mode, newline_support, visibility_allowed, auto_reload_session, web_browsing_allowed, see_project_mode, include_history, auto_compact_enabled, mcp_enabled, onboarding_completed, theme_mode, access_scope, theme.*, run_policy, effort, reasoning, budget",
   );
   printInfo("Run `/config -h` to see full config help.");
   return true;

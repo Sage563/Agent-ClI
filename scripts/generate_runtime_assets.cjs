@@ -6,7 +6,7 @@ const path = require("path");
 const ROOT = process.cwd();
 const OUT_FILE = path.join(ROOT, "src", "runtime_assets.generated.ts");
 
-const FALLBACK_PROMPT = "You are Agent CLI. Output valid JSON only.";
+const FALLBACK_PROMPT = "You are Agent CLI. Output valid JSON only. For code edits, prioritize using the `changes` array to output differences instead of rewriting entire files. Keep responses concise.";
 const FALLBACK_CONFIG = {
   active_provider: "ollama",
   providers: {

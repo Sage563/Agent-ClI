@@ -27,6 +27,13 @@ function run(cmd) {
     execSync(cmd, { stdio: "inherit" });
 }
 
+function runNpm(script) {
+    const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+    const cmd = `${npmBin} run ${script}`;
+    console.log(`> ${cmd}`);
+    execSync(cmd, { stdio: "inherit" });
+}
+
 async function loadRcedit() {
     try {
         const mod = await import("rcedit");
@@ -138,7 +145,7 @@ async function build() {
 
         // 2. Bundle with esbuild
         console.log("Bundling with esbuild...");
-        run("npm run bundle:exe");
+        runNpm("bundle:exe");
 
         // 3. Generate SEA blob
         console.log("Generating SEA blob...");

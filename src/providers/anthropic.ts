@@ -1,11 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { cfg } from "../config";
 import type { TaskPayload } from "../types";
-import type { ProviderCallOptions, ProviderResult } from "./base";
-import { Provider } from "./base";
+import type { ProviderCallOptions, ProviderResult, ProviderConfig } from "./base";
+import { ResilientProvider } from "./base";
 
 
-export class AnthropicProvider extends Provider {
+export class AnthropicProvider extends ResilientProvider {
+  constructor() {
+    super({ name: "anthropic", timeout: 30000, maxRetries: 3 });
+  }
   private buildMessages(task: TaskPayload) {
     const cloned = { ...task } as Record<string, any>;
     const history = Array.isArray(cloned.session_history) ? cloned.session_history : [];
@@ -35,7 +38,7 @@ export class AnthropicProvider extends Provider {
     return messages;
   }
 
-  async call(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
+  protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const apiKey = cfg.getApiKey("anthropic");
     if (!apiKey) throw new Error("Anthropic API key not found. Use '/config anthropic_api_key <key>'.");
 
@@ -84,7 +87,7 @@ export class AnthropicProvider extends Provider {
     };
   }
 
-  async validate() {
+  protected async executeValidation() {
     const apiKey = cfg.getApiKey("anthropic");
     if (!apiKey) return { ok: false, message: "Anthropic API key not set." };
     try {

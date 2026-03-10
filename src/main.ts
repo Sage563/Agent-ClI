@@ -46,7 +46,7 @@ export async function runMain() {
     eventBus.emit({
       phase: "thinking",
       status: "start",
-      message: "Agent CLI startup",
+      message: "Agent CLi startup",
     });
     ensureRuntimeAssets();
     applyConfiguredThemeMode();
@@ -75,11 +75,14 @@ export async function runMain() {
     const model = cfg.getModel(provider) || "unknown";
     const sessionName = getActiveSessionName();
     printPanel(
-      `**Agent CLI** v1.1\n\n` +
+      `**Agent CLi** v1.1\n\n` +
       `Provider: **${provider}**\n` +
       `Model: **${model}**\n` +
       `Session: **${sessionName}**\n\n` +
       `Type \`/help\` for commands.\n` +
+      `Try \`/assist fix <issue>\` for Copilot-inspired workflows.\n` +
+      `Use \`/config max_requests <number>\` to limit requests per session.\n` +
+      `Use \`/skills\` to create/list local skills.\n` +
       `Type \`/config -h\` for all config options.\n` +
       `Type \`@\` to open the context picker and attach files.\n` +
       `Use \`!command\` to run shell commands inline.\n` +
@@ -95,7 +98,7 @@ export async function runMain() {
     if (args.query) await handle(args.query, args);
     await loop(async (text) => handle(text, args));
   } catch (error) {
-    console.error("Agent CLI crashed with a fatal error:");
+    console.error("Agent CLi crashed with a fatal error:");
     console.error(error);
     eventBus.emit({
       phase: "error",
@@ -111,7 +114,7 @@ export async function runMain() {
     eventBus.emit({
       phase: "finished",
       status: "end",
-      message: "Agent CLI shutdown",
+      message: "Agent CLi shutdown",
       success: true,
     });
   }
