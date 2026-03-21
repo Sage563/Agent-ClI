@@ -2,14 +2,23 @@ import { exec } from "child_process";
 import { getProjectFiles } from "./file_browser";
 import { cfg } from "./config";
 import { THEME, console as consoleUi, setupScrollRegion, getToolbar, themeColor, setPromptInputActive } from "./ui/console";
+import { isTuiEnabled, refreshFileList, setInput as setTuiInput, setPreviewFromPath, tuiScrollUp, tuiScrollDown, setInputHeight, forceRender } from "./ui/tui";
 import { openContextPicker } from "./ui/context_picker";
 import { registry } from "./commands/registry";
+import { toggleAgent, getActiveAgentName } from "./core/agents";
+import { MISSION_BOARD } from "./core/agent";
 import chalk from "chalk";
 import readline from "readline";
 import logUpdate from "log-update";
 
 let isRawMode = false;
 let lastInputRenderRows = 0;
+const promptQueue: string[] = [];
+
+const ANSI_RE = /\x1B\[[0-9;]*[A-Za-z]/g;
+function visibleLength(text: string) {
+  return String(text || "").replace(ANSI_RE, "").length;
+}
 
 function cursorLineCol(text: string, cursorPos: number) {
   const clamped = Math.max(0, Math.min(text.length, cursorPos));
@@ -37,7 +46,7 @@ function stripAnsi(text: string) {
 function buildInputHint(inputBuffer: string) {
   const text = String(inputBuffer || "").trim();
   if (!text) {
-    return "Tip: /assist fix <issue> | /config -h | @ attach file | ! run shell command";
+    return "Tip: /assist fix <issue> | /config -h | @ attach file | ! run shell command | Use ';;' to queue prompts";
   }
   if (text.startsWith("/")) {
     const cmd = String(text.split(/\s+/)[0] || "").toLowerCase();
@@ -56,112 +65,95 @@ function buildInputHint(inputBuffer: string) {
   if (text.startsWith("!")) {
     return "Shell mode: the command after ! executes in your terminal";
   }
+  if (text.startsWith("/queue")) {
+    return "Queue mode: /queue prompt1 ;; prompt2 ;; prompt3";
+  }
   if (text.includes("@")) {
     return "Context mode: @path attaches files to the prompt";
   }
   return "Enter submits. Use /assist for guided workflows.";
 }
 
+function splitQueuedPrompts(input: string, allowNewlines = false) {
+  const raw = String(input || "").trim();
+  if (!raw) return [];
+  const parts = allowNewlines
+    ? raw.split(/(?:;;|\r?\n)+/g)
+    : raw.split(/;;/g);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
 function render(promptText: string, inputBuffer: string, cursorOffset: number) {
-  if (lastInputRenderRows > 1) {
-    process.stdout.write(`\x1b[${lastInputRenderRows - 1}A`);
+  if (isTuiEnabled()) {
+    setTuiInput(inputBuffer, cursorOffset);
+    const cols = Math.max(20, process.stdout.columns || 80);
+    const fullText = promptText + inputBuffer;
+    const maxContentWidth = cols - 4;
+    const inputLines = Math.max(1, Math.ceil(fullText.length / maxContentWidth) || 1);
+    setInputHeight(inputLines + 2); 
+    forceRender();
+    return;
   }
-  // Clear screen below cursor just in case, then hide cursor during render
-  process.stdout.write("\x1b[?25l");
-
-  // Move to a clean line and clear below ONLY if we've rendered before.
-  // This preserves the "Ready" panel on the very first render.
-  if (lastInputRenderRows > 0) {
-    process.stdout.write("\x1b[2K\x1b[G\x1b[J");
-  } else {
-    process.stdout.write("\x1b[G"); // Just move to start of line
-  }
-
-  // Render true multiline input without marker artifacts.
-  const promptStyled = chalk.bold(themeColor(THEME.primary)(promptText));
-  const promptLen = promptText.length;
   const cols = Math.max(20, process.stdout.columns || 80);
-  const hintText = buildInputHint(inputBuffer);
-  const cursorPos = Math.max(0, inputBuffer.length - cursorOffset);
-  const logicalLines = inputBuffer.split("\n");
-  const cursor = cursorLineCol(inputBuffer, cursorPos);
   const rows = Math.max(10, process.stdout.rows || 24);
-  // Reserve bottom rows so prompt input stays above the status toolbar.
-  const inputRows = Math.max(1, rows - (hintText ? 4 : 3));
-  const firstPrefixLen = promptLen;
-  const continuePrefixLen = promptLen;
-  const firstWidth = Math.max(1, cols - firstPrefixLen - 1);
-  const continueWidth = Math.max(1, cols - continuePrefixLen - 1);
-
-  const visualRows: Array<{ text: string; logicalLine: number; chunkIndex: number; width: number }> = [];
-  let cursorVisualRow = 0;
-  let cursorVisualCol = 0;
-
-  for (let li = 0; li < logicalLines.length; li += 1) {
-    const line = logicalLines[li];
-    const firstChunks = wrapLine(line, li === 0 ? firstWidth : continueWidth);
-    const chunks = firstChunks.length ? firstChunks : [""];
-    for (let ci = 0; ci < chunks.length; ci += 1) {
-      const widthForChunk = li === 0 && ci === 0 ? firstWidth : continueWidth;
-      visualRows.push({ text: chunks[ci], logicalLine: li, chunkIndex: ci, width: widthForChunk });
+  const promptStyled = chalk.bold(themeColor(THEME.primary)(promptText));
+  const fullText = promptText + inputBuffer;
+  const cursorIdx = promptText.length + inputBuffer.length - cursorOffset;
+  const lines: string[] = [];
+  const maxContentWidth = cols - 4;
+  let currentLine = "";
+  let cursorRow = 0;
+  let cursorCol = 0;
+  for (let i = 0; i < fullText.length; i++) {
+    if (i === cursorIdx) {
+      cursorRow = lines.length;
+      cursorCol = currentLine.length;
+    }
+    currentLine += fullText[i];
+    if (currentLine.length >= maxContentWidth) {
+      lines.push(currentLine);
+      currentLine = "";
     }
   }
-
-  const cursorLineText = logicalLines[cursor.line] || "";
-  const cursorChunkIndex = Math.floor(cursor.col / (cursor.line === 0 ? firstWidth : continueWidth));
-  const cursorChunkBase = cursorChunkIndex * (cursor.line === 0 ? firstWidth : continueWidth);
-  const cursorColInChunk = Math.max(0, Math.min((cursor.line === 0 ? firstWidth : continueWidth), cursor.col - cursorChunkBase));
-  let walked = 0;
-  for (let li = 0; li < logicalLines.length; li += 1) {
-    const w = li === 0 ? firstWidth : continueWidth;
-    const chunkCount = wrapLine(logicalLines[li] || "", w).length;
-    if (li === cursor.line) {
-      cursorVisualRow = walked + Math.min(Math.max(0, chunkCount - 1), cursorChunkIndex);
-      break;
+  if (currentLine.length > 0 || fullText.length === 0 || cursorIdx === fullText.length) {
+    if (cursorIdx === fullText.length) {
+      cursorRow = lines.length;
+      cursorCol = currentLine.length;
     }
-    walked += chunkCount;
+    lines.push(currentLine);
   }
-  cursorVisualCol = Math.min(cursorColInChunk, (cursorLineText.length - cursorChunkBase >= 0 ? (cursorLineText.length - cursorChunkBase) : 0));
-
-  const startRow = Math.max(0, cursorVisualRow - inputRows + 1);
-  const endRow = Math.min(visualRows.length, startRow + inputRows);
-  const visibleRows = visualRows.slice(startRow, endRow);
-  const cursorVisibleRow = Math.max(0, cursorVisualRow - startRow);
-  let cursorColumnAbsolute = promptLen;
-
-  for (let i = 0; i < visibleRows.length; i += 1) {
-    if (i > 0) process.stdout.write("\n");
-    process.stdout.write("\x1b[2K\x1b[G");
-    const isFirst = i === 0 && startRow === 0;
-    const prefixPlain = isFirst ? promptText : " ".repeat(promptLen);
-    const prefixStyled = isFirst ? promptStyled : " ".repeat(promptLen);
-    process.stdout.write(prefixStyled + visibleRows[i].text);
-    if (i === cursorVisibleRow) {
-      cursorColumnAbsolute = prefixPlain.length + Math.max(0, cursorVisualCol);
+  const inputRowsCount = lines.length;
+  const hintText = buildInputHint(inputBuffer);
+  const toolbar = getToolbar();
+  const missionHeight = MISSION_BOARD ? MISSION_BOARD.getHeight() : 0;
+  const totalReserved = inputRowsCount + 4 + missionHeight;
+  setupScrollRegion(totalReserved);
+  const startRow = rows - (totalReserved - 1);
+  process.stdout.write("\x1b7\x1b[?25l"); 
+  process.stdout.write(`\x1b[${startRow};1H\x1b[2K`);
+  process.stdout.write(chalk.gray("\u2554" + "\u2550".repeat(cols - 2) + "\u2557"));
+  for (let i = 0; i < lines.length; i++) {
+    process.stdout.write(`\x1b[${startRow + 1 + i};1H\x1b[2K`);
+    const content = lines[i];
+    const padding = " ".repeat(Math.max(0, maxContentWidth - content.length));
+    let lineOutput = content;
+    if (i === 0 && content.startsWith(promptText)) {
+      lineOutput = promptStyled + content.substring(promptText.length);
     }
+    process.stdout.write(chalk.gray("\u2551 ") + lineOutput + padding + chalk.gray(" \u2551"));
   }
-
-  // Draw bottom toolbar
-  process.stdout.write("\x1b7"); // Save cursor pos (DEC, more compatible)
-  process.stdout.write(`\x1b[${Math.max(1, rows - 1)};1H`); // row above toolbar
-  process.stdout.write("\x1b[2K\x1b[G");
-  if (hintText) {
-    const clipped = stripAnsi(hintText).slice(0, Math.max(0, cols - 1));
-    process.stdout.write(chalk.dim(clipped));
-  }
-  process.stdout.write(`\x1b[${rows};1H`); // move to bottom left
-  process.stdout.write("\x1b[2K\x1b[G"); // clear toolbar row before redraw
-  process.stdout.write(getToolbar()); // draw toolbar
-  process.stdout.write("\x1b8"); // Restore cursor pos (DEC, more compatible)
-
-  const totalLinesRendered = visibleRows.length;
-  lastInputRenderRows = Math.max(1, totalLinesRendered);
-  const linesUp = Math.max(0, totalLinesRendered - 1 - cursorVisibleRow);
-  if (linesUp > 0) process.stdout.write(`\x1b[${linesUp}A`);
-  process.stdout.write(`\x1b[G\x1b[${Math.max(0, cursorColumnAbsolute)}C`);
-
-  // Show cursor
-  process.stdout.write("\x1b[?25h");
+  const hintRow = startRow + 1 + inputRowsCount;
+  process.stdout.write(`\x1b[${hintRow};1H\x1b[2K`);
+  const hintClipped = stripAnsi(hintText).slice(0, cols - 4);
+  const hintPadding = " ".repeat(Math.max(0, cols - 4 - hintClipped.length));
+  process.stdout.write(chalk.gray("\u2551 ") + chalk.dim(hintClipped) + hintPadding + chalk.gray(" \u2551"));
+  const bottomRow = hintRow + 1;
+  process.stdout.write(`\x1b[${bottomRow};1H\x1b[2K`);
+  const bottomPaddingLen = Math.max(0, cols - 2 - stripAnsi(toolbar).length);
+  process.stdout.write(chalk.gray("\u255a") + toolbar + chalk.gray("\u2550".repeat(bottomPaddingLen) + "\u255d"));
+  process.stdout.write("\x1b8");
+  if (MISSION_BOARD) { try { MISSION_BOARD.refresh(); } catch { } }
+  process.stdout.write(`\x1b[${startRow + 1 + cursorRow};${3 + cursorCol}H\x1b[?25h`);
 }
 
 export async function promptMultiline(message = "Enter input:") {
@@ -172,301 +164,176 @@ export async function promptMultiline(message = "Enter input:") {
 async function customInputLoop(promptStr: string = "agent-cli> "): Promise<string> {
   return new Promise((resolve) => {
     let inputBuffer = "";
-    let cursorOffset = 0; // offset from end of string (0 = at end)
-    let pickerActive = false;
+    let cursorOffset = 0;
     let suppressNextLf = false;
+    let pickerActive = false;
 
-    // Enable raw mode
-    try { logUpdate.clear(); } catch { /* ignore */ }
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.setEncoding('utf8');
+    process.stdin.setEncoding("utf8");
     isRawMode = true;
-    // setupScrollRegion is now handled externally or stays active
 
     const cleanup = () => {
       process.stdin.setRawMode(false);
-      process.stdin.removeListener('data', onData);
-      process.stdout.removeListener('resize', onResize);
+      process.stdin.removeListener("data", onData);
+      process.stdout.removeListener("resize", onResize);
       isRawMode = false;
-      lastInputRenderRows = 0;
-      // Keep stdin resumed so next prompt is immediately interactive.
       process.stdin.resume();
-      // process.stdout.write("\x1b[2K\x1b[G"); // Removed to preserve prompt
-      // Do not re-echo submitted prompt text here; it can duplicate the already-rendered input line.
-      process.stdout.write("\n");
-      process.stdout.write("\x1b[?25h");
+      if (!isTuiEnabled()) setupScrollRegion(0);
+      process.stdout.write("\n\x1b[?25h");
     };
 
     const onResize = () => {
-      setupScrollRegion();
-      try {
-        render(promptStr, inputBuffer, cursorOffset);
-      } catch {
-        // ignore redraw failures during terminal resize races
-      }
+      if (!isTuiEnabled()) setupScrollRegion();
+      try { render(promptStr, inputBuffer, cursorOffset); } catch { }
     };
+    process.stdout.on("resize", onResize);
 
-    process.stdout.on('resize', onResize);
-
-    const splitChunk = (chunk: string) => {
+    const splitKey = (chunk: string): string[] => {
       const out: string[] = [];
       let i = 0;
       while (i < chunk.length) {
-        const ch = chunk[i];
-        if (ch !== "\x1b") {
-          out.push(ch);
-          i += 1;
-          continue;
-        }
-        // Parse known CSI/SS3 escape sequences as a single token.
-        if (i + 1 < chunk.length && (chunk[i + 1] === "[" || chunk[i + 1] === "O")) {
+        if (chunk[i] === "\x1b" && i + 1 < chunk.length && (chunk[i+1] === "[" || chunk[i+1] === "O")) {
           let j = i + 2;
           while (j < chunk.length) {
-            const c = chunk[j];
-            // End on final byte for CSI/SS3 sequence.
-            if ((c >= "A" && c <= "Z") || (c >= "a" && c <= "z") || c === "~" || c === "u") {
-              j += 1;
-              break;
-            }
-            j += 1;
+            const char = chunk[j++];
+            if ((char >= "A" && char <= "Z") || (char >= "a" && char <= "z") || char === "~" || char === "u") break;
           }
-          out.push(chunk.slice(i, Math.min(j, chunk.length)));
-          i = Math.min(j, chunk.length);
-          continue;
-        }
-        out.push(ch);
-        i += 1;
+          out.push(chunk.substring(i, j)); i = j;
+        } else { out.push(chunk[i++]); }
       }
       return out;
     };
 
-    const isLeft = (key: string) => key === "\x1b[D" || key === "\x1bOD" || /^\x1b\[\d+;\d+D$/.test(key);
-    const isRight = (key: string) => key === "\x1b[C" || key === "\x1bOC" || /^\x1b\[\d+;\d+C$/.test(key);
-    const isMouseSequence = (key: string) => key.startsWith("\x1b[<") || key.startsWith("\x1b[M");
-    const isCtrlEnter = (key: string) =>
-      key === "\x1b[13;5u" ||
-      key === "\x1b[27;5;13~" ||
-      key === "\x1b[13;5~" ||
-      key === "\x1b[27;13;5~" ||
-      key === "\x1b[1;5M" ||
-      /^\x1b\[\d+;5[~u]$/.test(key) ||
-      /^\x1b\[\d+;\d+;13~$/.test(key);
-    const isF6 = (key: string) => key === "\x1b[17~";
-
     const onData = (chunk: string) => {
-      // Ignore focus events or empty chunks that arrive on Alt+Tab or terminal refocus
       if (!chunk || chunk === "\x1b[I" || chunk === "\x1b[O") return;
-
-      for (const key of splitChunk(chunk)) {
+      for (const key of splitKey(chunk)) {
         if (pickerActive) continue;
         const realCursorPos = inputBuffer.length - cursorOffset;
-
-        // Ctrl+C
-        if (key === '\u0003') {
-          inputBuffer = "";
-          cursorOffset = 0;
-          try {
-            render(promptStr, inputBuffer, cursorOffset);
-          } catch {
-            // ignore redraw failure and continue input collection
-          }
+        if (key === "\u0003") { // Ctrl+C
+          inputBuffer = ""; cursorOffset = 0;
+          try { render(promptStr, inputBuffer, 0); } catch { }
           continue;
         }
-
-        if (isF6(key)) {
-          exec("code .", { timeout: 5_000 }, (error) => {
-            if (error) {
-              consoleUi.print(themeColor(THEME.error)("Failed to open IDE. Ensure `code` command is available."));
-            } else {
-              consoleUi.print(themeColor(THEME.success)("Opened IDE (VS Code)."));
-            }
+        if (key === "\x1b[17~") { // F6
+          exec("code .", (err) => {
+            if (err) consoleUi.print(themeColor(THEME.error)("Failed to open IDE."));
+            else consoleUi.print(themeColor(THEME.success)("Opened IDE."));
           });
           continue;
         }
-
-        // CRLF from some terminals arrives as two events. Ignore the follow-up LF.
-        if (key === "\n" && suppressNextLf) {
-          suppressNextLf = false;
-          continue;
-        }
-
-        // Ctrl+Enter / F5 / Enter submit from the prompt line.
-        const isForceSubmitKey =
-          key === '\x1b[15~' || // F5
-          isCtrlEnter(key);
-        const isEnterKey = key === '\r' || key === '\n';
-        const shouldSubmit =
-          isForceSubmitKey ||
-          isEnterKey;
-
-        if (shouldSubmit || isEnterKey) {
+        if (key === "\n" && suppressNextLf) { suppressNextLf = false; continue; }
+        if (key === "\r" || key === "\n") {
           if (key === "\r") suppressNextLf = true;
-          // Submit
-          try {
-            // Render final state with cursor at end before cleaning up
-            render(promptStr, inputBuffer, 0);
-          } catch { /* ignore */ }
-          cleanup();
-          resolve(inputBuffer);
-          return;
+          try { render(promptStr, inputBuffer, 0); } catch { }
+          cleanup(); resolve(inputBuffer); return;
         }
-        // Tab
-        else if (key === '\t') {
-          inputBuffer = inputBuffer.substring(0, realCursorPos) + "\t" + inputBuffer.substring(realCursorPos);
-          cursorOffset = inputBuffer.length - (realCursorPos + 1);
-        }
-        // Backspace
-        else if (key === '\x7f' || key === '\b') {
+        if (key === "\t") {
+          toggleAgent();
+          try { render(promptStr, inputBuffer, cursorOffset); } catch { }
+        } else if (key === "\x7f" || key === "\b") { // Backspace
           if (realCursorPos > 0) {
             inputBuffer = inputBuffer.substring(0, realCursorPos - 1) + inputBuffer.substring(realCursorPos);
-            cursorOffset = inputBuffer.length - (realCursorPos - 1);
+            try { render(promptStr, inputBuffer, cursorOffset); } catch { }
           }
-        }
-        // Arrow Keys (ANSI sequences)
-        else if (key.startsWith('\x1b[') || key.startsWith("\x1bO")) {
-          if (isMouseSequence(key)) {
-            // Ignore mouse wheel/drag sequences so scrolling doesn't inject input behavior.
-          } else if (isRight(key)) { // Right
-            if (cursorOffset > 0) cursorOffset--;
-          } else if (isLeft(key)) { // Left
-            if (cursorOffset < inputBuffer.length) cursorOffset++;
+        } else if (key.startsWith("\x1b[<")) { // Mouse
+          if (isTuiEnabled()) {
+            const m = key.match(/\x1b\[<(\d+);/);
+            if (m && m[1] === "64") tuiScrollUp(3);
+            if (m && m[1] === "65") tuiScrollDown(3);
           }
-        }
-        // ESC: ignore.
-        else if (key === "\x1b") {
-          // Ignored.
-        }
-        // Normal characters
-        else if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
-          if (key === '@') {
-            pickerActive = true;
-            void (async () => {
-              try {
-                const result = await openContextPicker({ maxPreviewLines: 20 });
-                if (result.action === "confirm" && result.selected.length > 0) {
-                  const invalid = result.selected.filter((p) => /\s/.test(p));
-                  const safe = result.selected.filter((p) => !/\s/.test(p));
-                  if (invalid.length) {
-                    consoleUi.print(themeColor(THEME.warning)(`Skipped ${invalid.length} path(s) with spaces.`));
-                  }
-                  if (safe.length) {
-                    const tokens = safe.map((p) => `@${p}`).join(" ") + " ";
-                    inputBuffer = inputBuffer.substring(0, realCursorPos) + tokens + inputBuffer.substring(realCursorPos);
-                    cursorOffset = inputBuffer.length - (realCursorPos + tokens.length);
-                  }
-                }
-              } finally {
-                pickerActive = false;
-                try {
-                  render(promptStr, inputBuffer, cursorOffset);
-                } catch {
-                  // ignore redraw failure and continue input collection
-                }
+        } else if (key === "\x1b[5~") { if (isTuiEnabled()) tuiScrollUp(10); } 
+        else if (key === "\x1b[6~") { if (isTuiEnabled()) tuiScrollDown(10); }
+        else if (key === "\x1b[D" || key === "\x1bOD") { // Left
+          if (cursorOffset < inputBuffer.length) { cursorOffset++; try { render(promptStr, inputBuffer, cursorOffset); } catch { } }
+        } else if (key === "\x1b[C" || key === "\x1bOC") { // Right
+          if (cursorOffset > 0) { cursorOffset--; try { render(promptStr, inputBuffer, cursorOffset); } catch { } }
+        } else if (key === "@") {
+          pickerActive = true; setPromptInputActive(false);
+          void (async () => {
+            try {
+              const res = await openContextPicker();
+              if (res.action === "confirm" && res.selected.length > 0) {
+                const tokens = res.selected.map(p => `@${p}`).join(" ") + " ";
+                inputBuffer = inputBuffer.substring(0, realCursorPos) + tokens + inputBuffer.substring(realCursorPos);
               }
-            })();
-            continue;
-          }
+            } finally {
+              pickerActive = false; setPromptInputActive(true);
+              process.stdin.setRawMode(true); process.stdin.resume();
+              try { render(promptStr, inputBuffer, cursorOffset); } catch { }
+            }
+          })();
+        } else if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) {
           inputBuffer = inputBuffer.substring(0, realCursorPos) + key + inputBuffer.substring(realCursorPos);
-          cursorOffset = inputBuffer.length - (realCursorPos + 1);
-        }
-
-        try {
-          render(promptStr, inputBuffer, cursorOffset);
-        } catch {
-          // ignore redraw failure and continue input collection
+          try { render(promptStr, inputBuffer, cursorOffset); } catch { }
         }
       }
     };
-
-    process.stdin.on('data', onData);
+    process.stdin.on("data", onData);
     process.stdin.resume();
-    try {
-      render(promptStr, inputBuffer, cursorOffset);
-    } catch {
-      // ignore first-render errors and continue in raw input mode
-    }
+    try { render(promptStr, inputBuffer, cursorOffset); } catch { }
   });
 }
-
-// Ensure clean exit if the process dies while raw mode is active
-process.on('SIGINT', () => {
-  if (isRawMode && process.stdin.setRawMode) {
-    process.stdin.setRawMode(false);
-    process.stdout.write("\x1b[?25h"); // Show cursor
-  }
-  process.stdout.write("\nUse /exit to quit.\n");
-});
 
 async function fallbackInputLoop(promptStr: string = "agent-cli > "): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   consoleUi.print(getToolbar());
   return new Promise<string>((resolve) => {
-    rl.question(promptStr, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
+    rl.question(promptStr, (answer) => { rl.close(); resolve(answer); });
   });
 }
 
 export async function loop(cb: (text: string) => Promise<unknown> | unknown) {
   try {
+    if (isTuiEnabled()) refreshFileList(".");
     while (true) {
-      // Use fallback if not a TTY
       setPromptInputActive(true);
-      const value = process.stdin.isTTY ? await customInputLoop("agent-cli> ") : await fallbackInputLoop("agent-cli> ");
+      if (!isTuiEnabled()) setupScrollRegion();
+      let value = "";
+      if (promptQueue.length) {
+        value = promptQueue.shift() || "";
+        consoleUi.print(themeColor(THEME.dim)(`Queued prompt (${promptQueue.length} remaining)...`));
+      } else {
+        value = process.stdin.isTTY ? await customInputLoop("agent-cli> ") : await fallbackInputLoop("agent-cli> ");
+      }
       setPromptInputActive(false);
-      const stripped = value.trim();
-
+      const stripped = (value || "").trim();
       if (!stripped) continue;
       if (["exit", "quit", "/exit", "/quit"].includes(stripped.toLowerCase())) break;
 
-      // Handle simple inline shell commands
-      if (stripped.startsWith("!")) {
-        const shellCommand = stripped.slice(1).trim();
-        if (!shellCommand) continue;
-        const timeoutRaw = Number(cfg.get("command_timeout_ms", 30_000));
-        const timeoutUnlimited = !Number.isFinite(timeoutRaw) || timeoutRaw <= 0;
-        await new Promise<void>((resolve) => {
-          const execOptions = timeoutUnlimited ? {} : { timeout: Math.floor(timeoutRaw) };
-          exec(shellCommand, execOptions, (error, stdout, stderr) => {
-            if (stdout) consoleUi.print(stdout);
-            if (stderr) consoleUi.print(stderr);
-            if (error) consoleUi.print(`Error: ${error.message}`);
-            resolve();
+      if (stripped.startsWith("/queue")) {
+        const rest = stripped.substring(6).trim();
+        const queued = splitQueuedPrompts(rest, true);
+        if (queued.length > 0) { promptQueue.push(...queued); continue; }
+      } else if (!stripped.startsWith("/") && stripped.includes(";;")) {
+        const queued = splitQueuedPrompts(stripped, false);
+        if (queued.length > 1) { promptQueue.push(...queued.slice(1)); value = queued[0]; }
+      }
+
+      const finalInput = (value || "").trim();
+      if (!finalInput) continue;
+
+      if (finalInput.startsWith("!")) {
+        const cmd = finalInput.substring(1).trim();
+        if (cmd) {
+          await new Promise<void>((resolve) => {
+            exec(cmd, (err, stdout, stderr) => {
+              if (stdout) consoleUi.print(stdout);
+              if (stderr) consoleUi.print(stderr);
+              if (err) consoleUi.print(chalk.red(`Error: ${err.message}`));
+              resolve();
+            });
           });
-        });
+        }
         continue;
       }
 
-      // Check attachments
-      if (stripped.includes("@")) {
-        const allFiles = new Set(getProjectFiles().map((x) => x.path));
-        const maybe = stripped
-          .split(/\s+/)
-          .filter((x) => x.startsWith("@"))
-          .map((x) => x.slice(1));
-        for (const p of maybe) {
-          const likelyNewFile = /[\\/]/.test(p) || /\.[A-Za-z0-9]{1,10}$/.test(p);
-          // Basic check if it exists in tracked files
-          if (!likelyNewFile && !allFiles.has(p.replace(/\\/g, "/"))) {
-            consoleUi.print(themeColor(THEME.warning)(`Warning: attachment might not exist in project view: ${p}`));
-          }
-        }
-      }
-
-      try {
-        await cb(stripped);
-      } catch (err) {
-        consoleUi.print(themeColor(THEME.error)(`Error during execution: ${String(err)}`));
+      try { await cb(finalInput); } catch (err) {
+        consoleUi.print(themeColor(THEME.error)(`Error: ${String(err)}`));
       }
     }
   } finally {
-    if (isRawMode && process.stdin.setRawMode) {
-      process.stdin.setRawMode(false);
-      process.stdout.write("\x1b[?25h"); // ensure cursor is visible
-    }
-    // Ensure the process can terminate after /exit or /quit.
+    if (isRawMode) { process.stdin.setRawMode(false); process.stdout.write("\x1b[?25h"); }
     process.stdin.pause();
   }
 }

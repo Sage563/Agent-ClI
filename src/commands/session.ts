@@ -95,6 +95,11 @@ registry.register("/session", "Manage sessions (list, new, load, delete, rename)
   return true;
 });
 
+registry.register("/session_gui", "Open the graphical session picker")(() => {
+  void showSessionGui();
+  return true;
+});
+
 registry.register("/reset", "Clear current session memory")(() => {
   clear();
   clearOllamaSessionContext();
@@ -105,4 +110,4 @@ registry.register("/reset", "Clear current session memory")(() => {
 export function registerSession() {
   return true;
 }
-    
+

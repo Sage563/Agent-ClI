@@ -4,7 +4,8 @@ import chalk from "chalk";
 import logUpdate from "log-update";
 import { getProjectFiles, searchProjectFiles, type ProjectFileEntry } from "../file_browser";
 import { cfg } from "../config";
-import { console, fit } from "./console";
+import { console, fit, isPromptInputActive, resetScrollRegion, setPromptInputActive, setupScrollRegion } from "./console";
+import { isTuiEnabled, refreshFileList, teardownTui } from "./tui";
 
 export type ContextPickerResult = {
   action: "confirm" | "cancel";
@@ -159,12 +160,14 @@ function renderPicker(params: {
   const rightWidth = Math.max(26, cols - leftWidth - 3);
   const listRows = Math.max(8, rows - 7);
 
-  const top = `${chalk.bold.cyan("Context File Picker")}  ${chalk.gray("Type to search")}`;
+  const title = "Context Files";
+  const status = `Files: ${files.length}  Selected: ${selected.size}`;
+  const spacer = Math.max(1, cols - title.length - status.length - 2);
+  const top = `${chalk.bold.cyan(title)}${" ".repeat(spacer)}${chalk.gray(status)}`;
   const queryLine = `${chalk.bold("Query:")} ${query || chalk.gray("(all files)")}`;
-  const countLine = `${chalk.gray(`Files: ${files.length} | Selected: ${selected.size}`)}`;
-  const border = "─".repeat(Math.max(1, cols));
+  const border = "-".repeat(Math.max(1, cols));
 
-  const lines: string[] = [top, queryLine, countLine, border];
+  const lines: string[] = [top, queryLine, border];
 
   for (let i = 0; i < listRows; i += 1) {
     const entry = files[i];
@@ -176,7 +179,7 @@ function renderPicker(params: {
       ? chalk.black.bgCyan(fit(leftRaw, leftWidth))
       : fit(leftRaw, leftWidth);
     const right = fit(previewLine, rightWidth);
-    lines.push(`${left} │ ${chalk.gray(right)}`);
+    lines.push(`${left} | ${chalk.gray(right)}`);
   }
 
   const previewHint = preview.image
@@ -188,11 +191,20 @@ function renderPicker(params: {
         : "[full preview]";
   lines.push(border);
   lines.push(chalk.gray(`Preview ${previewHint}`));
-  lines.push(chalk.gray("Controls: Up/Down move • Space toggle • Enter confirm • Esc cancel • Backspace delete"));
+  lines.push(chalk.gray("Controls: Up/Down move | Space toggle | Enter confirm | Esc cancel | Backspace delete"));
   return lines.join("\n");
 }
 
 export async function openContextPicker(opts: ContextPickerOptions = {}): Promise<ContextPickerResult> {
+  const priorPromptActive = isPromptInputActive();
+  setPromptInputActive(true);
+  resetScrollRegion();
+  if (isTuiEnabled()) teardownTui();
+  try {
+    process.stdout.write("\x1b[?25l");
+  } catch {
+    // ignore
+  }
   const maxPreviewLines = Math.max(1, Number(opts.maxPreviewLines || 20));
   const rootDir = opts.rootDir || ".";
   const allFiles = getProjectFiles(rootDir);
@@ -233,9 +245,10 @@ export async function openContextPicker(opts: ContextPickerOptions = {}): Promis
     }
   };
 
-  return await new Promise<ContextPickerResult>((resolve) => {
-    const onResize = () => refresh();
-    const onData = (chunk: string) => {
+  try {
+    return await new Promise<ContextPickerResult>((resolve) => {
+      const onResize = () => refresh();
+      const onData = (chunk: string) => {
       for (const key of splitChunk(chunk)) {
         if (key === "\u0003" || key === "\x1b") {
           cleanup();
@@ -287,13 +300,22 @@ export async function openContextPicker(opts: ContextPickerOptions = {}): Promis
       logUpdate.clear();
       try {
         process.stdout.write("\x1b[2K\x1b[G");
+        process.stdout.write("\x1b[?25h");
       } catch {
         // ignore
       }
+      resetScrollRegion();
+      setupScrollRegion();
+      setPromptInputActive(priorPromptActive);
+      if (isTuiEnabled()) refreshFileList(".");
     };
 
-    process.stdin.on("data", onData);
-    process.stdout.on("resize", onResize);
-    refresh();
-  });
+      process.stdin.on("data", onData);
+      process.stdout.on("resize", onResize);
+      refresh();
+    });
+  } finally {
+    // Ensure prompt state is restored even if the picker throws unexpectedly.
+    setPromptInputActive(priorPromptActive);
+  }
 }

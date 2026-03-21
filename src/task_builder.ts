@@ -290,7 +290,7 @@ export function build(text: string, plan: boolean, fast = false, missionData?: M
   }
 
   const seeMode = cfg.isSeeMode();
-  const includeProjectMap = plan || seeMode;
+  const includeProjectMap = plan || seeMode || cfg.get("context_extension", true);
 
   const payload: TaskPayload = {
     mode: plan ? "plan" : "apply",

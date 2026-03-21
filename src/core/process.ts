@@ -13,11 +13,24 @@ class BackgroundProcess {
     this.handle = handle;
     this.process = spawn(command, { shell: true, stdio: ["pipe", "pipe", "pipe"] });
 
+    this.process.on("error", (err) => {
+      this.errorQueue.push(`Process Error: ${err.message}`);
+      this.isRunning = false;
+    });
     this.process.stdout.on("data", (chunk: Buffer) => {
       this.outputQueue.push(chunk.toString("utf8"));
     });
+    this.process.stdout.on("error", (err) => {
+      this.errorQueue.push(`Stdout Error: ${err.message}`);
+    });
     this.process.stderr.on("data", (chunk: Buffer) => {
       this.errorQueue.push(chunk.toString("utf8"));
+    });
+    this.process.stderr.on("error", (err) => {
+      this.errorQueue.push(`Stderr Error: ${err.message}`);
+    });
+    this.process.stdin.on("error", (err) => {
+      this.errorQueue.push(`Stdin Error: ${err.message}`);
     });
     this.process.on("exit", () => {
       this.isRunning = false;

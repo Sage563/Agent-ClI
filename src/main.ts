@@ -3,9 +3,11 @@ import { loop } from "./input_mode";
 import { cfg } from "./config";
 import { getActiveSessionName } from "./memory";
 import { printPanel, printSessionStats, setupScrollRegion, THEME } from "./ui/console";
+import { initTui, isTuiEnabled, teardownTui } from "./ui/tui";
 import { applyConfiguredThemeMode, runFirstLaunchOnboarding } from "./onboarding";
 import { ensureRuntimeAssets } from "./runtime_assets";
 import { eventBus } from "./core/events";
+import chalk from "chalk";
 
 type CliArgs = {
   query: string | null;
@@ -62,6 +64,11 @@ export async function runMain() {
       await runFirstLaunchOnboarding();
     }
 
+    // Initialize TUI after onboarding
+    if (!args.oneshot) {
+      initTui();
+    }
+
     if (args.continueSession) {
       printPanel(`Continuing session: ${getActiveSessionName()}`, "Session", "blue", false, false, true);
     }
@@ -74,32 +81,43 @@ export async function runMain() {
     const provider = cfg.getActiveProvider();
     const model = cfg.getModel(provider) || "unknown";
     const sessionName = getActiveSessionName();
-    printPanel(
-      `**Agent CLi** v1.1\n\n` +
-      `Provider: **${provider}**\n` +
-      `Model: **${model}**\n` +
-      `Session: **${sessionName}**\n\n` +
-      `Type \`/help\` for commands.\n` +
-      `Try \`/assist fix <issue>\` for Copilot-inspired workflows.\n` +
-      `Use \`/config max_requests <number>\` to limit requests per session.\n` +
-      `Use \`/skills\` to create/list local skills.\n` +
-      `Type \`/config -h\` for all config options.\n` +
-      `Type \`@\` to open the context picker and attach files.\n` +
-      `Use \`!command\` to run shell commands inline.\n` +
-      `Enter = submit | F5 = submit | Type @ to attach context files.`,
-      "Ready",
-      THEME.secondary || "cyan",
-      true,
-      false,
-      true
-    );
 
-    setupScrollRegion();
+    // Only show ASCII logo and welcome panel in non-TUI mode
+    if (!isTuiEnabled() || !process.stdout.isTTY) {
+      const logoLines = [
+        `      /\\                        _      ___   _ _ `,
+        `     /  \\   __ _  ___ _ __ | |_   / __\\ | (_| )`,
+        `    / /\\ \\ / _\` |/ _ \\ '_ \\| __| / /  | | | |/ `,
+        `   / ____ \\ (_| |  __/ | | | |_ / /___| | | |  `,
+        `  /_/    \\_\\__, |\\___|_| |_|\\__|\\____/|_|_|_|  `,
+        `           |___/                               `
+      ];
+
+      // Smooth modern gradient from Cyan to Blue
+      const hexColors = ['#00ffff', '#00e5ff', '#00ccff', '#00b2ff', '#0099ff', '#007fff'];
+      const gradientLogo = logoLines.map((line, idx) => chalk.bold.hex(hexColors[idx])(line)).join('\n');
+      console.log(`\n${gradientLogo}\n`);
+
+      // Quick welcome info
+      printPanel(
+        `Provider: **${provider}**  \u2022  Model: **${model}**  \u2022  Session: **${sessionName}**\n\n` +
+        `Type \`/help\` for commands or \`@\` to attach files.\n` +
+        `Submit with Enter or F5.`,
+        "Ready",
+        THEME.secondary || "cyan",
+        false,
+        false,
+        false
+      );
+    }
+
+    if (!isTuiEnabled()) setupScrollRegion();
     if (args.query) await handle(args.query, args);
     await loop(async (text) => handle(text, args));
   } catch (error) {
     console.error("Agent CLi crashed with a fatal error:");
     console.error(error);
+    teardownTui();
     eventBus.emit({
       phase: "error",
       status: "end",
@@ -108,6 +126,7 @@ export async function runMain() {
     });
     process.exit(1);
   } finally {
+    teardownTui();
     if (SESSION_STATS.input_tokens > 0) {
       printSessionStats(SESSION_STATS as unknown as Record<string, unknown>);
     }

@@ -7,19 +7,26 @@ vi.mock("log-update", () => {
   return { default: fn };
 });
 
-import logUpdate from "log-update";
+vi.mock("../ui/tui", () => ({
+  isTuiEnabled: vi.fn(() => false),
+  appendChat: vi.fn(),
+  appendTool: vi.fn(),
+  setStatus: vi.fn()
+}));
+
 import { MissionBoard } from "../ui/console";
 
 describe("MissionBoard rendering", () => {
-  const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => { });
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true as any);
   const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 
   beforeEach(() => {
     vi.useFakeTimers();
     consoleSpy.mockClear();
-    vi.mocked(logUpdate).mockClear();
-    (logUpdate.clear as any).mockClear();
+    stdoutSpy.mockClear();
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    Object.defineProperty(process.stdout, "rows", { value: 24, configurable: true });
   });
 
   afterEach(() => {
@@ -41,15 +48,18 @@ describe("MissionBoard rendering", () => {
     board.close();
   });
 
-  it("updates the live block on timer ticks without printing history", () => {
+  it("updates the live block on timer ticks using absolute positioning", () => {
     const board = new MissionBoard("test");
     board.update({ status: "STREAMING", live_text: "Currently Editing src/core/agent.ts", tasks: [{ text: "edit", done: false }] });
-    consoleSpy.mockClear();
+    stdoutSpy.mockClear();
 
     vi.advanceTimersByTime(150);
 
-    expect(vi.mocked(logUpdate).mock.calls.length).toBeGreaterThan(1);
-    expect(consoleSpy).not.toHaveBeenCalled();
+    // Should call write for at least the progress line and the thinking line
+    expect(stdoutSpy).toHaveBeenCalled();
+    const calls = stdoutSpy.mock.calls.map(c => c[0] as string);
+    // Should contain CSI escape sequences for positioning (\x1b[row;colH)
+    expect(calls.some(c => c.includes("\x1b["))).toBe(true);
     board.close();
   });
 });

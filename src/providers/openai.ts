@@ -43,6 +43,7 @@ export class OpenAIProvider extends ResilientProvider {
 
     const client = new OpenAI({ apiKey, timeout: 360000 });
     const providerConfig = cfg.getProviderConfig("openai");
+    const thinkingEnabled = typeof providerConfig.thinking === "boolean" ? providerConfig.thinking : true;
     const streamOverride = task._stream_enabled;
     const streamEnabled = typeof streamOverride === "boolean" ? streamOverride : Boolean(providerConfig.stream ?? cfg.get("stream", true));
     const messages = this.buildMessages(system, task);
@@ -71,9 +72,9 @@ export class OpenAIProvider extends ResilientProvider {
           if (opts?.streamCallback) opts.streamCallback(content);
         }
         const reasoning = delta?.reasoning_content;
-        if (reasoning) reasoningChunks.push(reasoning);
+        if (thinkingEnabled && reasoning) reasoningChunks.push(reasoning);
       }
-      return { text: chunks.join(""), usage, thinking: reasoningChunks.join("") };
+      return { text: chunks.join(""), usage, thinking: thinkingEnabled ? reasoningChunks.join("") : "" };
     }
 
     const response = await client.chat.completions.create({
@@ -88,7 +89,7 @@ export class OpenAIProvider extends ResilientProvider {
         input_tokens: response.usage?.prompt_tokens || 0,
         output_tokens: response.usage?.completion_tokens || 0,
       },
-      thinking: String((message as any)?.reasoning_content || ""),
+      thinking: thinkingEnabled ? String((message as any)?.reasoning_content || "") : "",
     };
   }
 

@@ -196,10 +196,27 @@ export function compactSession(name?: string, keepRecentTurns = 8, maxSummaryEnt
 
   const toSummary = data.session.slice(0, -keepRecentTurns);
   const recent = data.session.slice(-keepRecentTurns);
-  const focus = toSummary
+
+  // Advanced Pruning: remove large tool results (grep, glob, reading files) from toSummary
+  // to save even more space while keeping the core logic/intent.
+  const pruned = toSummary.map((e) => {
+    let content = String(e.content || "");
+    if (content.length > 2000) {
+      // If it looks like a tool result or large file read, truncate it for the summary.
+      if (content.includes("grep_results") || content.includes("glob_results") || content.includes("### Browse Report")) {
+        content = content.slice(0, 300) + "\n... (large tool output pruned for compaction) ...";
+      } else if (content.length > 5000) {
+        content = content.slice(0, 500) + "\n... (large entry truncated) ...";
+      }
+    }
+    return { ...e, content };
+  });
+
+  const focus = pruned
     .slice(0, maxSummaryEntries)
     .map((e, idx) => `${idx + 1}. [${String(e.role || "user")}] ${String(e.content || "").replace(/\s+/g, " ").trim().slice(0, 180)}`)
     .join("\n");
+
   const summaryText = [
     "### SESSION COMPACTED",
     `Previously: ${toSummary.length} turns.`,

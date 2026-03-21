@@ -8,6 +8,7 @@ import {
   add,
   compactSession,
   estimateTokens,
+  getActiveSessionName,
   getOllamaPromptFingerprint,
   getOllamaSessionContext,
   invalidateOllamaContext,
@@ -28,8 +29,13 @@ import {
   gitDiff,
   createFile,
   moveFile,
-  deleteFile
+  deleteFile,
+  fileTree
 } from "./tools";
+import { grepProject, formatGrepResults, globFiles, formatGlobResults } from "./grep_glob";
+import { todoWrite, todoRead, todoUpdateStatus, type TodoItem } from "./todo_tracker";
+import { multiEdit, searchAndReplace } from "./multi_edit";
+import { getActiveAgent, getActiveAgentName, isToolAllowed, parseSubagentMention, getSubagent, switchAgent } from "./agents";
 import { apply, undoLastApply } from "../applier";
 import { isFullAccess } from "./permissions";
 import { intel } from "./intelligence";
@@ -55,6 +61,7 @@ import {
   startThinking,
   stopThinking,
 } from "../ui/console";
+import { appendStreamingDelta, endStreamingMessage, isTuiEnabled, startStreamingMessage } from "../ui/tui";
 import { DEBUG_HISTORY } from "../commands/dev";
 import { getRuntimePrompt } from "../runtime_assets";
 import { showSessionGui } from "../ui/session_gui";
@@ -80,6 +87,8 @@ import "../commands/access";
 import "../commands/diffs";
 import "../commands/skills";
 import "../commands/assist";
+import "../commands/connect";
+import "../commands/share";
 
 /**
  * Interface for interactive UI operations that can be implemented differently
@@ -168,7 +177,7 @@ export const SESSION_STATS: SessionStats = {
   start_time: Date.now() / 1000,
 };
 
-let MISSION_BOARD: MissionBoard | null = null;
+export let MISSION_BOARD: MissionBoard | null = null;
 const LAST_EDITED_FILES: string[] = [];
 const MISSION_IDLE_LIMIT = 3;
 const MISSION_MAX_STEPS = 5000;
@@ -190,6 +199,20 @@ function redactPromptLeak(text: string) {
     return "I can’t share internal instructions or hidden prompts. I can continue the task directly.";
   }
   return value;
+}
+
+function stripUiInstructionNoise(text: string) {
+  const raw = String(text || "");
+  if (!raw.trim()) return raw;
+  const lines = raw.split(/\r?\n/);
+  const filtered = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    if (/^Output format\s*:/i.test(trimmed)) return false;
+    if (/^Return strict JSON only/i.test(trimmed)) return false;
+    return true;
+  });
+  return filtered.join("\n").trim();
 }
 
 function extractJsonStringAt(buffer: string, start: number) {
@@ -267,185 +290,17 @@ const STREAM_TOOL_KEYS = [
   "move_file",
   "delete_file",
   "apply_undo",
+  "grep",
+  "glob",
+  "todowrite",
+  "todoread",
+  "patch",
+  "multi_edit",
+  "search_replace",
+  "file_tree",
 ];
 
-export class StreamingJsonObserver {
-  private buffer = "";
-  private fieldStarts: Record<StreamStringField, number | null> = {
-    response: null,
-    thought: null,
-    thinking: null,
-    plan: null,
-    self_critique: null,
-    ask_user: null,
-  };
-  private emitted: Record<StreamStringField, string> = {
-    response: "",
-    thought: "",
-    thinking: "",
-    plan: "",
-    self_critique: "",
-    ask_user: "",
-  };
-  private completed: Record<StreamStringField, boolean> = {
-    response: false,
-    thought: false,
-    thinking: false,
-    plan: false,
-    self_critique: false,
-    ask_user: false,
-  };
-  private seenFiles = new Set<string>();
-  private seenSchemaKeys = new Set<string>();
-  private seenToolKeys = new Set<string>();
 
-  private findFieldStart(field: StreamStringField) {
-    if (this.fieldStarts[field] !== null || this.completed[field]) return;
-    const re = new RegExp(`"${field}"\\s*:\\s*"`, "g");
-    const match = re.exec(this.buffer);
-    if (match) {
-      this.fieldStarts[field] = match.index + match[0].length;
-    }
-  }
-
-  private updateField(field: StreamStringField) {
-    this.findFieldStart(field);
-    const start = this.fieldStarts[field];
-    if (start === null) return "";
-    const parsed = extractJsonStringAt(this.buffer, start);
-    const decoded = decodeJsonStringFragment(parsed.raw, parsed.complete);
-    const previous = this.emitted[field];
-    const delta = decoded.startsWith(previous) ? decoded.slice(previous.length) : decoded;
-    this.emitted[field] = decoded;
-    if (parsed.complete) this.completed[field] = true;
-    return delta;
-  }
-
-  private discoverSchemaKeys() {
-    const newKeys: string[] = [];
-    let inString = false;
-    let escaped = false;
-    let objectDepth = 0;
-    let arrayDepth = 0;
-
-    for (let i = 0; i < this.buffer.length; i += 1) {
-      const ch = this.buffer[i];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch === "\\") {
-          escaped = true;
-          continue;
-        }
-        if (ch === '"') inString = false;
-        continue;
-      }
-
-      if (ch === "{") {
-        objectDepth += 1;
-        continue;
-      }
-      if (ch === "}") {
-        objectDepth = Math.max(0, objectDepth - 1);
-        continue;
-      }
-      if (ch === "[") {
-        arrayDepth += 1;
-        continue;
-      }
-      if (ch === "]") {
-        arrayDepth = Math.max(0, arrayDepth - 1);
-        continue;
-      }
-
-      if (ch !== '"') continue;
-      inString = true;
-
-      // Only capture top-level object keys (ignore nested keys like changes[].original/edited).
-      if (objectDepth !== 1 || arrayDepth !== 0) continue;
-
-      const parsed = extractJsonStringAt(this.buffer, i + 1);
-      if (!parsed.complete) continue;
-      const key = decodeJsonStringFragment(parsed.raw, true).trim();
-      // Move i to closing quote position.
-      i += parsed.raw.length + 1;
-      inString = false;
-
-      let j = i + 1;
-      while (j < this.buffer.length && /\s/.test(this.buffer[j])) j += 1;
-      if (this.buffer[j] !== ":") continue;
-      if (!key || this.seenSchemaKeys.has(key)) continue;
-      this.seenSchemaKeys.add(key);
-      newKeys.push(key);
-    }
-    return newKeys;
-  }
-
-  private discoverToolSignals() {
-    const signals: string[] = [];
-    for (const key of STREAM_TOOL_KEYS) {
-      if (this.seenToolKeys.has(key)) continue;
-      if (new RegExp(`"${key}"\\s*:`).test(this.buffer)) {
-        this.seenToolKeys.add(key);
-        signals.push(key);
-      }
-    }
-    return signals;
-  }
-
-  private discoverFileEdits() {
-    const fileEdits: string[] = [];
-    const fileRegex = /"file"\s*:\s*"/g;
-    let match: RegExpExecArray | null = null;
-    while ((match = fileRegex.exec(this.buffer))) {
-      const start = match.index + match[0].length;
-      const parsed = extractJsonStringAt(this.buffer, start);
-      if (!parsed.complete) continue;
-      const filePath = decodeJsonStringFragment(parsed.raw, true).trim();
-      if (filePath && !this.seenFiles.has(filePath)) {
-        this.seenFiles.add(filePath);
-        fileEdits.push(filePath);
-      }
-    }
-    return fileEdits;
-  }
-
-  snapshot() {
-    return {
-      response: this.emitted.response,
-      thought: this.emitted.thought,
-      thinking: this.emitted.thinking,
-      plan: this.emitted.plan,
-      self_critique: this.emitted.self_critique,
-      ask_user: this.emitted.ask_user,
-      rawTail: this.buffer.slice(-3000),
-      seenSchemaKeys: [...this.seenSchemaKeys],
-      seenToolKeys: [...this.seenToolKeys],
-    };
-  }
-
-  ingest(chunk: string) {
-    this.buffer += chunk;
-    const deltas: Record<StreamStringField, string> = {
-      response: this.updateField("response"),
-      thought: this.updateField("thought"),
-      thinking: this.updateField("thinking"),
-      plan: this.updateField("plan"),
-      self_critique: this.updateField("self_critique"),
-      ask_user: this.updateField("ask_user"),
-    };
-
-    return {
-      deltas,
-      fileEdits: this.discoverFileEdits(),
-      newSchemaKeys: this.discoverSchemaKeys(),
-      toolSignals: this.discoverToolSignals(),
-    };
-  }
-}
 
 function parseLooseKvResponse(text: string) {
   const validKeys = new Set([
@@ -601,6 +456,11 @@ function normalizeDisplayNewlines(value: string) {
   return (value || "").replace(/\\\\n/g, "\n").replace(/\\n/g, "\n");
 }
 
+function isProviderThinkingEnabled(providerName: string) {
+  const value = cfg.getProviderConfig(providerName).thinking;
+  return typeof value === "boolean" ? value : true;
+}
+
 function stripResponseWrapperText(value: string) {
   let out = normalizeDisplayNewlines(String(value || ""));
   if (!out.trim()) return "";
@@ -636,6 +496,7 @@ function cleanVisibleAssistantText(value: string) {
     /\n?\s*"(thought|plan|self_critique|ask_user|changes|commands|context|request_files|web_search|web_browse|search_project)"\s*:\s*[\s\S]*$/i,
     "",
   );
+  out = stripUiInstructionNoise(out);
   return out.trim();
 }
 
@@ -738,9 +599,9 @@ function sanitizeStreamFieldPreview(field: "response" | "thought" | "plan" | "as
   }
 
   if (field === "response") {
-    return cleanVisibleAssistantText(out);
+    return stripUiInstructionNoise(cleanVisibleAssistantText(out));
   }
-  return out.trim();
+  return stripUiInstructionNoise(out.trim());
 }
 
 function extractClaimedFilePaths(responseMsg: string) {
@@ -939,7 +800,8 @@ async function getDynamicPrompt(text: string) {
     }
   }
 
-  if (cfg.get("think_mode", false)) {
+  const providerThinkingEnabled = isProviderThinkingEnabled(cfg.getActiveProvider());
+  if (cfg.get("think_mode", false) && providerThinkingEnabled) {
     prompt +=
       "\n\n[Think Mode Enabled]\nWhen appropriate, reason deeply and explicitly. Return strict JSON only.";
   }
@@ -1451,7 +1313,7 @@ function detectEditClaimWithoutChanges(responseMsg: string, responseText: string
   return hasEditVerb && claimedPaths.length > 0;
 }
 
-async function runMissionTools(data: Record<string, any>, missionData: MissionData | undefined) {
+async function runMissionTools(data: Record<string, any>, missionData: MissionData | undefined, args?: HandleArgs) {
   const missionResults: MissionData = {};
   let toolActivityCount = 0;
   let lastActivity = "";
@@ -1556,37 +1418,47 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
     const searchType = searchTypeRaw === "news" ? "news" : "text";
     const finalQueries = normalizedQueries;
     if (finalQueries.length) {
-      updateStatus(`Running web search: ${finalQueries.join(", ")}...`);
-      eventBus.emit({
-        phase: "searching_web",
-        status: "start",
-        message: `Running web search: ${finalQueries.join(", ")}`,
-      });
-      markToolResult(`web_search:${finalQueries.join(", ")}`);
-      asyncTasks.push(
-        (async () => {
-          try {
-            const results = await webSearch(finalQueries, searchType, Number(data.web_search_limit || 10));
-            missionResults.web_results = String(results || "").trim() || "Web search completed with no results.";
-            updateStatus("Web search complete.");
-            eventBus.emit({
-              phase: "searching_web",
-              status: "end",
-              message: "Web search complete.",
-              success: true,
-            });
-          } catch (error) {
-            missionResults.web_results = `Web search failed: ${String(error)}`;
-            updateStatus(`Web search failed: ${String(error)}`);
-            eventBus.emit({
-              phase: "searching_web",
-              status: "end",
-              message: `Web search failed: ${String(error)}`,
-              success: false,
-            });
-          }
-        })(),
-      );
+      const queryStr = finalQueries.join(", ");
+      const confirmed = args?.yes || !cfg.get("confirm_web_search", true) ||
+        await askYesNo("Confirm Web Search", `AI wants to search the web for: "${queryStr}"`);
+
+      if (!confirmed) {
+        missionResults.web_results = "Web search skipped by user.";
+        updateStatus("Web search skipped.");
+      } else {
+        process.stdout.write(chalk.bold.cyan(`[AI] Web Search: `) + chalk.dim(queryStr) + "\n");
+        updateStatus(`Running web search: ${queryStr}...`);
+        eventBus.emit({
+          phase: "searching_web",
+          status: "start",
+          message: `Running web search: ${queryStr}`,
+        });
+        markToolResult(`web_search:${queryStr}`);
+        asyncTasks.push(
+          (async () => {
+            try {
+              const results = await webSearch(finalQueries, searchType, Number(data.web_search_limit || 10));
+              missionResults.web_results = String(results || "").trim() || "Web search completed with no results.";
+              updateStatus("Web search complete.");
+              eventBus.emit({
+                phase: "searching_web",
+                status: "end",
+                message: "Web search complete.",
+                success: true,
+              });
+            } catch (error) {
+              missionResults.web_results = `Web search failed: ${String(error)}`;
+              updateStatus(`Web search failed: ${String(error)}`);
+              eventBus.emit({
+                phase: "searching_web",
+                status: "end",
+                message: `Web search failed: ${String(error)}`,
+                success: false,
+              });
+            }
+          })(),
+        );
+      }
     }
   }
 
@@ -1597,21 +1469,32 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
     const direct = normalizeStringList(wb);
     const finalUrls = urls.length ? urls : fromUrl.length ? fromUrl : direct;
     if (finalUrls.length) {
-      updateStatus(`Browsing URL(s): ${finalUrls.join(", ")}...`);
-      markToolResult(`web_browse:${finalUrls.length}`);
-      asyncTasks.push(
-        (async () => {
-          try {
-            const browseResult = await webBrowse(finalUrls);
-            const existing = String(missionResults.web_results || "");
-            missionResults.web_results = existing ? `${existing}\n\nBROWSE RESULTS:\n${browseResult}` : browseResult || "Browse completed with no results.";
-            updateStatus("Web browse complete.");
-          } catch (error) {
-            missionResults.web_results = `${String(missionResults.web_results || "")}\nWeb browse failed: ${String(error)}`.trim();
-            updateStatus(`Web browse failed: ${String(error)}`);
-          }
-        })(),
-      );
+      const urlStr = finalUrls.join(", ");
+      const confirmed = args?.yes || !cfg.get("confirm_web_browse", true) ||
+        await askYesNo("Confirm Web Browse", `AI wants to browse internal/external URLs: "${urlStr}"`);
+
+      if (!confirmed) {
+        const skipMsg = "Web browse skipped by user.";
+        missionResults.web_results = missionResults.web_results ? `${missionResults.web_results}\n\n${skipMsg}` : skipMsg;
+        updateStatus("Web browse skipped.");
+      } else {
+        process.stdout.write(chalk.bold.cyan(`[AI] Web Browse: `) + chalk.dim(urlStr) + "\n");
+        updateStatus(`Browsing URL(s): ${urlStr}...`);
+        markToolResult(`web_browse:${finalUrls.length}`);
+        asyncTasks.push(
+          (async () => {
+            try {
+              const browseResult = await webBrowse(finalUrls);
+              const existing = String(missionResults.web_results || "");
+              missionResults.web_results = existing ? `${existing}\n\nBROWSE RESULTS:\n${browseResult}` : browseResult || "Browse completed with no results.";
+              updateStatus("Web browse complete.");
+            } catch (error) {
+              missionResults.web_results = `${String(missionResults.web_results || "")}\nWeb browse failed: ${String(error)}`.trim();
+              updateStatus(`Web browse failed: ${String(error)}`);
+            }
+          })(),
+        );
+      }
     }
   }
 
@@ -1659,10 +1542,19 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
   if (data.terminal_spawn && typeof data.terminal_spawn === "object") {
     const command = String(data.terminal_spawn.command || "").trim();
     if (command) {
-      updateStatus(`Spawning terminal command: ${command}...`);
-      markToolResult(`terminal_spawn:${command}`);
-      const handle = procManager.spawn(command);
-      missionResults.terminal_results = `Process spawned. Handle: ${handle}`;
+      const confirmed = args?.yes || !cfg.get("confirm_terminal_spawn", true) ||
+        await askYesNo("Confirm Terminal Sequence", `AI wants to spawn a long-running process: "${command}"`);
+
+      if (!confirmed) {
+        missionResults.terminal_results = "Terminal spawn skipped by user.";
+        updateStatus("Terminal spawn skipped.");
+      } else {
+        process.stdout.write(chalk.bold.cyan(`[AI] Terminal Spawn: `) + chalk.dim(command) + "\n");
+        updateStatus(`Spawning terminal command: ${command}...`);
+        markToolResult(`terminal_spawn:${command}`);
+        const handle = procManager.spawn(command);
+        missionResults.terminal_results = `Process spawned. Handle: ${handle}`;
+      }
     }
   }
   if (data.terminal_input && typeof data.terminal_input === "object") {
@@ -1731,6 +1623,108 @@ async function runMissionTools(data: Record<string, any>, missionData: MissionDa
         });
       })(),
     );
+  }
+
+  if (data.grep && (typeof data.grep === "string" || typeof data.grep === "object")) {
+    const pattern = typeof data.grep === "string" ? data.grep : (data.grep as any).pattern || (data.grep as any).query;
+    if (pattern) {
+      updateStatus(`Grepping project for: ${pattern}...`);
+      markToolResult("grep");
+      const matches = await grepProject(pattern);
+      const results = formatGrepResults(matches);
+      const { printToolResult } = require("../ui/console");
+      printToolResult("grep", results.split("\n"));
+      missionResults.grep_results = results;
+    }
+  }
+
+  if (data.glob && (typeof data.glob === "string" || typeof data.glob === "object")) {
+    const pattern = typeof data.glob === "string" ? data.glob : (data.glob as any).pattern || (data.glob as any).query;
+    if (pattern) {
+      updateStatus(`Globbing files: ${pattern}...`);
+      markToolResult("glob");
+      const files = await globFiles(pattern);
+      const results = formatGlobResults(files);
+      const { printToolResult } = require("../ui/console");
+      printToolResult("glob", results.split("\n"));
+      missionResults.glob_results = results;
+    }
+  }
+
+  if (data.commands) {
+    const raw = data.commands;
+    const commands = Array.isArray(raw) ? raw : (typeof raw === "string" ? [raw] : []);
+    if (commands.length) {
+      const cmdStr = commands.join("; ");
+      const confirmed = args?.yes || !cfg.get("confirm_shell_commands", true) ||
+        await askYesNo("Confirm Shell Commands", `AI wants to run: "${cmdStr}"`);
+
+      if (!confirmed) {
+        missionResults.command_results = "Shell commands skipped by user.";
+        updateStatus("Shell commands skipped.");
+      } else {
+        process.stdout.write(chalk.bold.cyan(`[AI] Shell: `) + chalk.dim(cmdStr) + "\n");
+        updateStatus(`Running ${commands.length} command(s)...`);
+        markToolResult(`commands:${commands.length}`);
+        const results = await runCommand(cmdStr);
+        missionResults.command_results = results;
+      }
+    }
+  }
+
+  if (data.todowrite) {
+    const raw = data.todowrite;
+    const todos = Array.isArray(raw) ? raw : (Array.isArray(raw.todos) ? raw.todos : []);
+    if (todos.length) {
+      updateStatus(`Updating ${todos.length} todo items...`);
+      markToolResult("todowrite");
+      missionResults.todo_result = todoWrite(todos);
+    } else if (typeof raw === "object" && (raw.task || raw.title)) {
+      // Handle single task shorthand
+      updateStatus(`Updating todo: ${raw.task || raw.title}...`);
+      markToolResult("todowrite");
+      missionResults.todo_result = todoWrite([{
+        id: raw.id || "task_1",
+        title: raw.task || raw.title,
+        status: raw.status || "pending",
+        notes: raw.notes || ""
+      }]);
+    }
+  }
+
+  if (data.todoread) {
+    updateStatus("Reading session todos...");
+    markToolResult("todoread");
+    missionResults.todo_list = todoRead();
+  }
+
+  if (data.multi_edit && typeof data.multi_edit === "object") {
+    const { file, edits } = data.multi_edit as any;
+    if (file && Array.isArray(edits)) {
+      updateStatus(`Applying multiple edits to ${file}...`);
+      markToolResult("multi_edit");
+      asyncTasks.push((async () => {
+        missionResults.multi_edit_result = await multiEdit(file, edits);
+      })());
+    }
+  }
+
+  if (data.search_replace && typeof data.search_replace === "object") {
+    const { file, pattern, replacement, flags } = data.search_replace as any;
+    if (file && pattern && replacement !== undefined) {
+      updateStatus(`Search and replace in ${file}...`);
+      markToolResult("search_replace");
+      asyncTasks.push((async () => {
+        missionResults.search_replace_result = await searchAndReplace(file, pattern, replacement, flags);
+      })());
+    }
+  }
+
+  if (data.file_tree) {
+    const { dir, depth } = typeof data.file_tree === "object" ? data.file_tree : { dir: ".", depth: 2 };
+    updateStatus(`Generating file tree for ${dir}...`);
+    markToolResult("file_tree");
+    missionResults.file_tree_result = fileTree(dir, { maxDepth: depth });
   }
 
   if (data.mcp_call && typeof data.mcp_call === "object") {
@@ -1825,6 +1819,25 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   if (text.startsWith("/")) {
     const executed = await registry.execute(text);
     if (executed) return null;
+
+    // Subagent mention check: @explore or @general
+    const mention = parseSubagentMention(text);
+    if (mention) {
+      const subagent = getSubagent(mention.agentName);
+      if (subagent) {
+        printInfo(`Invoking ${subagent.label} subagent...`);
+        // We could start a sub-mission or just switch agent temporarily.
+        // For now, let's treat it as a temporary context switch.
+        const prevAgent = getActiveAgentName();
+        switchAgent(subagent.name);
+        try {
+          return await handle(mention.task, args, missionData);
+        } finally {
+          switchAgent(prevAgent);
+        }
+      }
+    }
+
     const cmdToken = String(text.trim().split(/\s+/)[0] || "").toLowerCase();
     if (cmdToken.startsWith("/")) {
       const suggestions = registry.suggestCommands(cmdToken, 6);
@@ -1844,7 +1857,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     return null;
   }
 
-  if (cfg.isMissionMode() && !missionData) {
+  if (cfg.isMissionMode() && !missionData && !safeArgs.__planningPass) {
     return missionLoop(text, safeArgs, DEFAULT_CONTEXT);
   }
   const inMission = Boolean(missionData && (missionData as Record<string, unknown>).is_mission);
@@ -1946,6 +1959,13 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
 
   const prompt = await getDynamicPrompt(text);
+  const providerConfig = cfg.getProviderConfig(providerName);
+  const thinkingEnabled = isProviderThinkingEnabled(providerName);
+  const streamEnabled =
+    typeof providerConfig.stream === "boolean" ? providerConfig.stream : Boolean(cfg.get("stream", true));
+  const streamPrintEnabled =
+    typeof providerConfig.stream_print === "boolean" ? providerConfig.stream_print : Boolean(cfg.get("stream_print", true));
+  const streamPrintForTurn = streamPrintEnabled && !safeArgs.__planningPass;
   const ollamaModel = cfg.getModel("ollama");
   const promptFingerprint = providerName === "ollama" ? hashText(prompt) : "";
   const storedPromptFingerprint = providerName === "ollama" ? getOllamaPromptFingerprint() : "";
@@ -1959,8 +1979,8 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       ollama_include_history: !ollamaWarm,
     }
     : undefined);
-  task._stream_print = Boolean(cfg.get("stream_print", true));
-  task._stream_enabled = Boolean(cfg.get("stream", true));
+  task._stream_print = streamPrintForTurn;
+  task._stream_enabled = streamEnabled;
   if (providerName === "ollama" && ollamaWarm) {
     task.session_history = [];
   }
@@ -1975,7 +1995,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
   let streamedAskUser = "";
   let announcedStreaming = false;
-  let streamUiDisabledForTurn = false;
+  let streamUiDisabledForTurn = !streamPrintForTurn || isPromptInputActive();
   let streamUiFallbackNotified = false;
   let waitingForUserLocked = false;
   let askUserLogged = false;
@@ -1985,6 +2005,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   let rawThinkOpen = false;
   let rawThinkCarry = "";
   const ingestRawThinkingChunk = (chunk: string) => {
+    if (!thinkingEnabled) return;
     const input = `${rawThinkCarry}${String(chunk || "")}`;
     rawThinkCarry = "";
     if (!input) return;
@@ -2124,13 +2145,13 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const printStreamDelta = () => {
     if (streamUiDisabledForTurn || isPromptInputActive()) return;
     const split = extractThinkBlocks(streamedResponse || "");
-    // Show thinking whenever the model emits it, even if think_mode is off.
-    const thoughtToPrint = [streamedThinking.trim(), split.thinking.trim(), streamedThought.trim()]
-      .filter(Boolean)
-      .join("\n");
-    const mergedThought = thoughtToPrint.trim();
+    // Show thinking only when enabled for the provider.
+    const thoughtToPrint = thinkingEnabled
+      ? [streamedThinking.trim(), split.thinking.trim(), streamedThought.trim()].filter(Boolean).join("\n")
+      : "";
+    const mergedThought = thinkingEnabled ? thoughtToPrint.trim() : "";
     const displayResponse = stripResponseWrapperText(sanitizeStreamFieldPreview("response", split.response || ""));
-    const displayThought = sanitizeStreamFieldPreview("thought", mergedThought);
+    const displayThought = thinkingEnabled ? sanitizeStreamFieldPreview("thought", mergedThought) : "";
 
     // Print new thought deltas
     if (displayThought.length > lastPrintedThoughtLen) {
@@ -2139,7 +2160,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       } else {
         const alreadyAnnounced = announcedThought || (missionData && (missionData as any).thought_announced);
         if (!alreadyAnnounced) {
-          process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.magenta("AGENT THINKING")}${chalk.dim("--------")}\n`);
+          process.stdout.write(`\n${chalk.dim("\u2500".repeat(10))}${chalk.bold.magenta(" AGENT THINKING ")}${chalk.dim("\u2500".repeat(20))}\n`);
           announcedThought = true;
           if (missionData) (missionData as any).thought_announced = true;
         }
@@ -2157,7 +2178,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       } else {
         const alreadyAnnounced = announcedPlan || (missionData && (missionData as any).plan_announced);
         if (!alreadyAnnounced) {
-          process.stdout.write(`\n${chalk.dim("----")}${chalk.bold.cyan("AGENT PLAN")}${chalk.dim("--------")}\n`);
+          process.stdout.write(`\n${chalk.dim("\u2500".repeat(10))}${chalk.bold.cyan(" AGENT PLAN ")}${chalk.dim("\u2500".repeat(20))}\n`);
           announcedPlan = true;
           if (missionData) (missionData as any).plan_announced = true;
         }
@@ -2169,12 +2190,22 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
 
     // Print new response deltas
     if (displayResponse.length > lastPrintedResponseLen) {
+      if (isTuiEnabled()) {
+        const delta = displayResponse.slice(lastPrintedResponseLen);
+        appendStreamingDelta(delta);
+        streamedResponsePrinted = true;
+        lastPrintedResponseLen = displayResponse.length;
+        return;
+      }
       const nextDelta = displayResponse.slice(lastPrintedResponseLen);
       const shouldBufferMarkdown =
         bufferMarkdownResponse ||
         hasLikelyMarkdownSyntax(displayResponse) ||
         hasPotentialMarkdownPrefix(displayResponse) ||
-        hasPotentialMarkdownPrefix(nextDelta);
+        hasPotentialMarkdownPrefix(nextDelta) ||
+        displayResponse.trim().startsWith("{") ||
+        displayResponse.trim().startsWith("[") ||
+        displayResponse.trim().startsWith("```json");
       if (shouldBufferMarkdown) {
         // Buffer markdown-heavy responses and render once at the end via console.print.
         bufferMarkdownResponse = true;
@@ -2185,7 +2216,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       if (!alreadyAnnounced) {
         // Ensure a newline before header if we already had a thought or plan
         const sep = (announcedThought || announcedPlan) ? "\n" : "";
-        process.stdout.write(`${sep}${chalk.dim("—".repeat(20))} ${chalk.bold.green("AI RESPONSE")} ${chalk.dim("—".repeat(20))}\n`);
+        process.stdout.write(`${sep}${chalk.dim("\u2500".repeat(10))} ${chalk.bold.green(" AI RESPONSE ")} ${chalk.dim("\u2500".repeat(20))}\n`);
         announcedResponse = true;
         if (missionData) (missionData as any).response_announced = true;
       }
@@ -2205,19 +2236,31 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     try {
       markStreamActivity?.();
       ingestRawThinkingChunk(chunk);
+      if (isPromptInputActive()) {
+        streamUiDisabledForTurn = true;
+      }
       streamBuffer.push(chunk);
       streamChunkCount += 1;
       if (streamChunkCount === 1) {
-        stopThinking();
-        if (!announcedStreaming) {
-          process.stdout.write("\n");
-          printActivity(`Streaming response from ${providerName}.`);
+        if (MISSION_BOARD) MISSION_BOARD.setStreaming(true);
+        if (isTuiEnabled()) {
+          startStreamingMessage();
           announcedStreaming = true;
-          eventBus.emit({
-            phase: "streaming",
-            status: "start",
-            message: `Streaming response from ${providerName}.`,
-          });
+        }
+        if (streamPrintForTurn && !isPromptInputActive() && !isTuiEnabled()) {
+          stopThinking();
+          if (!announcedStreaming) {
+            process.stdout.write("\n");
+            printActivity(`Streaming response from ${providerName}.`);
+            announcedStreaming = true;
+            eventBus.emit({
+              phase: "streaming",
+              status: "start",
+              message: `Streaming response from ${providerName}.`,
+            });
+          }
+        } else if (isPromptInputActive()) {
+          streamUiDisabledForTurn = true;
         }
       }
 
@@ -2227,7 +2270,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       if (observed.deltas.thought) streamedThought += observed.deltas.thought;
       if (observed.deltas.plan) streamedPlan += observed.deltas.plan;
 
-      if (observed.deltas.thinking) streamedThinking += observed.deltas.thinking;
+      if (thinkingEnabled && observed.deltas.thinking) streamedThinking += observed.deltas.thinking;
       if (observed.deltas.ask_user) streamedAskUser += observed.deltas.ask_user;
       if (!waitingForUserLocked && streamedAskUser.trim()) {
         waitingForUserLocked = true;
@@ -2243,20 +2286,26 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         parseLooseKvResponse(snapshot.rawTail);
       const liveResponse = normalizeDisplayNewlines(extractCanonicalResponse(liveParsed));
       const liveThought = normalizeDisplayNewlines(extractCanonicalThought(liveParsed));
-      const liveThinking = normalizeDisplayNewlines(String(liveParsed?.thinking || ""));
+      const liveThinking = thinkingEnabled ? normalizeDisplayNewlines(String(liveParsed?.thinking || "")) : "";
 
       if (liveResponse && liveResponse.length > streamedResponse.length) {
         streamedResponse = liveResponse;
+      } else if (snapshot.rawTail.length > streamedResponse.length) {
+        const rawContent = stripResponseWrapperText(snapshot.rawTail);
+        const isJsonPrompt = rawContent.trim().startsWith("{") || rawContent.trim().startsWith("[") || rawContent.trim().startsWith("```json");
+        if (!isJsonPrompt) {
+          streamedResponse = rawContent;
+        }
       }
       if (liveThought && liveThought.length > streamedThought.length) {
         streamedThought = liveThought;
       }
-      if (liveThinking && liveThinking.length > streamedThinking.length) {
+      if (thinkingEnabled && liveThinking && liveThinking.length > streamedThinking.length) {
         streamedThinking = liveThinking;
       }
       const splitStream = extractThinkBlocks(streamedResponse);
       streamedResponse = splitStream.response;
-      if (splitStream.thinking && splitStream.thinking.length > streamedThought.length) {
+      if (thinkingEnabled && splitStream.thinking && splitStream.thinking.length > streamedThought.length) {
         streamedThought = splitStream.thinking;
       }
 
@@ -2284,9 +2333,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
             if (askUserPreview) askUserLogged = true;
             return;
           }
+          const hasLiveThinking = thinkingEnabled && (streamedThinking || streamedThought);
           const liveText = streamedAskUser
             ? askUserPreview
-            : ((streamedThinking || streamedThought))
+            : (hasLiveThinking)
               ? "Thinking..."
               : streamedPlan
                 ? "Planning..."
@@ -2294,9 +2344,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
                   ? "Responding..."
                   : "Streaming...";
 
-          const liveMergedThought = [streamedThinking, streamedThought, String(snapshot.thinking || ""), String(snapshot.thought || "")]
-            .map((x) => String(x || "").trim())
-            .find(Boolean) || "";
+          const liveMergedThought = thinkingEnabled
+            ? [streamedThinking, streamedThought, String(snapshot.thinking || ""), String(snapshot.thought || "")]
+              .map((x) => String(x || "").trim())
+              .find(Boolean) || ""
+            : "";
 
           MISSION_BOARD.update({
             status: streamedAskUser ? "WAITING FOR USER" : "STREAMING",
@@ -2376,6 +2428,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     const result = streamExecution.result;
     responseText = result.text || "";
     rawModelThinking = result.thinking || "";
+    if (!thinkingEnabled) {
+      rawModelThinking = "";
+      streamedThinking = "";
+      streamedThought = "";
+    }
     usage = result.usage || usage;
     if (streamExecution.health.fallback_used) {
       printWarning("Streaming fallback engaged. Response completed using non-stream mode.");
@@ -2412,6 +2469,10 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
         message: "Streaming complete.",
         success: true,
       });
+      if (isTuiEnabled()) {
+        endStreamingMessage();
+        printActivity("Ready");
+      }
     }
     eventBus.emit({
       phase: "thinking",
@@ -2449,6 +2510,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     return null;
   } finally {
     stopThinking(); // Call stopThinking in finally block
+    if (MISSION_BOARD) MISSION_BOARD.setStreaming(false);
     if (streamHeartbeat) {
       clearInterval(streamHeartbeat);
       streamHeartbeat = null;
@@ -2495,6 +2557,24 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       delete (data as Record<string, unknown>).context;
     }
   }
+
+  // Auto-naming for default sessions
+  if (SESSION_STATS.turns === 1 && getActiveSessionName() === "default") {
+    void (async () => {
+      try {
+        const titlePrompt = `Generate a very short (2-4 words) descriptive title for this conversation based on this first turn: "${text}". Output only the title, no quotes or punctuation.`;
+        const titleResult = await handle(titlePrompt, { ...safeArgs, fast: true, plan: true }, missionData);
+        let title = String((titleResult as any)?.response || (titleResult as any)?.plan || "").trim();
+        title = title.replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, "_").toLowerCase().slice(0, 30);
+        if (title && title !== "default") {
+          const { renameSession } = require("../memory");
+          renameSession("default", title);
+          printActivity(`Session renamed to: ${title}`);
+        }
+      } catch { /* ignore */ }
+    })();
+  }
+
   if (!data.response) {
     const canonical = extractCanonicalResponse(data);
     if (canonical) data.response = canonical;
@@ -2590,9 +2670,11 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   const askUserQuestions = normalizeQuestionList(data.ask_user_questions ?? data.ask_user);
 
   if (MISSION_BOARD) {
-    const parsedMergedThought = [String(data.thought || ""), streamedThinking, streamedThought, String(rawModelThinking || "")]
-      .map((x) => String(x || "").trim())
-      .find(Boolean) || "";
+    const parsedMergedThought = thinkingEnabled
+      ? [String(data.thought || ""), streamedThinking, streamedThought, String(rawModelThinking || "")]
+        .map((x) => String(x || "").trim())
+        .find(Boolean) || ""
+      : "";
     MISSION_BOARD.update({
       status: "PARSING",
       status_style: THEME.secondary,
@@ -2602,7 +2684,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
     });
   }
 
-  const toolResults = await runMissionTools(data, missionData);
+  const toolResults = await runMissionTools(data, missionData, safeArgs);
   if (toolResults) {
     stopEditingSpinner();
     if (MISSION_BOARD) {
@@ -2751,15 +2833,19 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   responseMsg = cleanVisibleAssistantText(thinkSplit.response);
 
   // Per user request: prioritize raw reasoning (Ollama/tags) over schema thoughts.
-  const rawThinking = [rawModelThinking.trim(), thinkSplit.thinking.trim()].filter(Boolean).join("\n").trim();
-  const mergedThought = rawThinking || structuredThought || streamedThinking.trim() || streamedThought.trim();
-  const thoughtMsg = redactPromptLeak(mergedThought);
+  const rawThinking = thinkingEnabled
+    ? [rawModelThinking.trim(), thinkSplit.thinking.trim()].filter(Boolean).join("\n").trim()
+    : "";
+  const mergedThought = thinkingEnabled
+    ? rawThinking || structuredThought || streamedThinking.trim() || streamedThought.trim()
+    : "";
+  const thoughtMsg = thinkingEnabled ? redactPromptLeak(mergedThought) : "";
   if (!responseMsg.trim()) {
     responseMsg = hasToolIntent(data)
       ? buildFallbackResponse(data)
       : stripResponseWrapperText(responseText || streamText || "");
   }
-  if (!responseMsg.trim() && thoughtMsg.trim()) {
+  if (!responseMsg.trim() && thinkingEnabled && thoughtMsg.trim()) {
     responseMsg = `Model returned reasoning but no final answer.\n\n${thoughtMsg.slice(0, 1200)}`;
   }
   if (!responseMsg.trim()) {
@@ -2850,7 +2936,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
 
   const showUi = !Boolean(MISSION_BOARD);
-  if (thoughtMsg.trim() && !isFast) {
+  if (thinkingEnabled && thoughtMsg.trim() && !isFast) {
     displayThinking(rawModelThinking, thoughtMsg, showUi, Boolean(MISSION_BOARD));
   }
   // If response was already streamed to stdout, just add a newline separator.
@@ -2970,7 +3056,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
       printInfo("Auto-accepting file changes (Unlimited/Full Access).");
       printActivity("Auto-accepting file changes (Unlimited/Full Access).");
     }
-    if (autoApplyRequested && !requiresHumanReview) {
+    if ((autoApplyRequested || fullAccess) && !requiresHumanReview) {
       printInfo("Auto-applying changes and commands (Full/Auto Mode).");
     } else {
       if (autoApplyRequested && requiresHumanReview) {
@@ -3245,6 +3331,7 @@ export async function handle(text: string, args?: HandleArgs, missionData?: Miss
   }
 }
 export async function missionLoop(text: string, args: HandleArgs, context: AgentContext = DEFAULT_CONTEXT) {
+  const startTime = Date.now();
   const ui = context.ui;
   MISSION_BOARD = new MissionBoard("Agent CLi Mission Board");
   setMissionActivitySink((activityText: string) => {
@@ -3254,15 +3341,62 @@ export async function missionLoop(text: string, args: HandleArgs, context: Agent
       live_text: activityText,
     });
   });
+
+  // --- Auto-Planning Phase ---
+  // Only log the objective if it's the real user objective, not a planning prompt
+  if (!text.toLowerCase().includes("mission planning agent")) {
+    ui.updateMissionStatus({
+      status: "PLANNING MISSION",
+      status_style: THEME.accent,
+      log: `Objective: ${text.slice(0, 500)}`,
+      live_text: "Generating task list...",
+    });
+  }
+
+  const planningPrompt = `You are a mission planning agent. Given the following objective, generate a structured list of tasks (as a JSON array of strings) to achieve it.
+Objective: ${text}
+Output format: { "tasks": ["task 1", "task 2", ...] }`;
+
+  let planningResult: Awaited<ReturnType<typeof handle>> | null = null;
+  try {
+    planningResult = await handle(planningPrompt, { ...args, fast: true, __planningPass: true }, { is_mission: true });
+  } catch (error) {
+    printWarning(`Mission planning failed; continuing without task list. (${String(error)})`);
+    if (MISSION_BOARD) {
+      MISSION_BOARD.update({
+        status: "PLANNING FAILED",
+        status_style: THEME.warning,
+        log: "Planning pass failed; continuing without a task list.",
+      });
+    }
+  }
+  let initialTasks: string[] = [];
+  try {
+    const pr = planningResult as Record<string, any>;
+    if (pr.tasks && Array.isArray(pr.tasks)) {
+      initialTasks = pr.tasks;
+    } else if (typeof pr.response === "string") {
+      const parsed = parseJsonBestEffort(pr.response) as any;
+      if (parsed && Array.isArray(parsed.tasks)) initialTasks = parsed.tasks;
+    }
+  } catch { /* ignore */ }
+
   ui.updateMissionStatus({
     status: "MISSION START",
     status_style: THEME.accent,
     log: `Objective: ${text}`,
-    tasks: [],
-    thought: "",
+    tasks: initialTasks.map(t => ({ text: t })),
+    thought: "Mission plan generated. Starting execution.",
   });
 
-  const missionData: MissionData = { is_mission: true, step_count: 1 };
+  const missionData: MissionData = {
+    is_mission: true,
+    step_count: 1,
+    files_modified: [],
+    files_created: [],
+    commands_run: 0,
+    tasks_total: initialTasks.length || 0
+  };
   let stepCount = 1;
   let idleSteps = 0;
   let completionData: Record<string, any> = {};
@@ -3363,20 +3497,39 @@ export async function missionLoop(text: string, args: HandleArgs, context: Agent
       Boolean(data.mission_complete) || String(planValue).trim().toUpperCase() === "MISSION COMPLETE";
 
     if (complete) {
+      const durationMs = Date.now() - startTime;
       completionData = {
         response: stripResponseWrapperText(String(data.response || "Mission completed successfully.")),
         thought: data.thought || "Objective achieved.",
         response_emitted: Boolean((data as Record<string, unknown>).__response_emitted),
       };
+
+      const mObj = missionData as any;
+      const stats = {
+        tasksCompleted: MISSION_BOARD.tasks.filter(t => t.done).length,
+        totalTasks: MISSION_BOARD.tasks.length,
+        durationMs,
+        filesModified: mObj.files_modified || [],
+        filesCreated: mObj.files_created || [],
+        commandsRun: mObj.commands_run || 0,
+        tokensUsed: SESSION_STATS.input_tokens + SESSION_STATS.output_tokens,
+        cost: SESSION_STATS.total_cost,
+      };
+
       if (MISSION_BOARD) {
-        MISSION_BOARD.setProgressDone(stepCount);
+        MISSION_BOARD.setProgressDone(stats.tasksCompleted);
         MISSION_BOARD.update({
           status: "MISSION COMPLETE",
           status_style: THEME.success,
           thought: completionData.thought || "",
           log: "Objective achieved.",
         });
+        MISSION_BOARD.close();
       }
+
+      const { printMissionSummary } = require("../ui/console");
+      printMissionSummary(stats);
+
       break;
     }
 
@@ -3422,12 +3575,18 @@ export async function missionLoop(text: string, args: HandleArgs, context: Agent
           .map((c: any) => c?.file || "(unknown)")
           .filter(Boolean);
         actionParts.push(`Edited: ${files.join(", ")}`);
+
+        const mObj = missionData as any;
+        mObj.files_modified = [...new Set([...(mObj.files_modified || []), ...files])];
       }
       if (hasCommands) {
         const cmds = (Array.isArray(dataObj.commands) ? dataObj.commands : [dataObj.commands])
           .map((c: any) => c?.command || "(unknown)")
           .filter(Boolean);
         actionParts.push(`Ran: ${cmds.join("; ")}`);
+
+        const mObj = missionData as any;
+        mObj.commands_run = (mObj.commands_run || 0) + cmds.length;
       }
       if (hasToolKey) {
         actionParts.push("Used tool");
@@ -3524,7 +3683,8 @@ export async function missionLoop(text: string, args: HandleArgs, context: Agent
 
   if (completionData.response && !Boolean((completionData as Record<string, unknown>).response_emitted)) {
     console.print(String(completionData.response));
-    if (completionData.thought && Boolean(cfg.get("think_mode", false))) {
+    const thinkingEnabled = isProviderThinkingEnabled(cfg.getActiveProvider());
+    if (completionData.thought && Boolean(cfg.get("think_mode", false)) && thinkingEnabled) {
       process.stdout.write("\n");
       console.print(chalk.gray(String(completionData.thought)));
     }
@@ -3532,3 +3692,6 @@ export async function missionLoop(text: string, args: HandleArgs, context: Agent
   printSuccess(`Mission finished at step ${stepCount}.`);
   return null;
 }
+
+
+

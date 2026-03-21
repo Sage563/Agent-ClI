@@ -22,6 +22,13 @@ function normalizeEndpoint(raw: string) {
   return withProtocol.replace(/\/+$/, "");
 }
 
+function buildEndpointCandidates(endpoint: string, path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const primary = `${endpoint}${normalizedPath}`;
+  if (/\/v1(\/|$)/i.test(endpoint)) return [primary];
+  return [primary, `${endpoint}/v1${normalizedPath}`];
+}
+
 function summarizeOllamaErrorBody(data: unknown) {
   if (!data) return "";
   if (typeof data === "string") return data.trim();
@@ -36,6 +43,12 @@ function summarizeOllamaErrorBody(data: unknown) {
     }
   }
   return String(data);
+}
+
+function isModelNotFoundResponse(status: number, data: unknown) {
+  if (status !== 404) return false;
+  const detail = summarizeOllamaErrorBody(data).toLowerCase();
+  return detail.includes("model") && detail.includes("not found");
 }
 
 function extractThinkingLike(parsed: any) {
@@ -65,7 +78,7 @@ export class OllamaProvider extends ResilientProvider {
   protected async executeCall(system: string, task: TaskPayload, opts?: ProviderCallOptions): Promise<ProviderResult> {
     const providerConfig = cfg.getProviderConfig("ollama");
     const endpoint = normalizeEndpoint(String(providerConfig.endpoint || "http://localhost:11434"));
-    const url = `${endpoint}/api/chat`;
+    const [primaryUrl, fallbackUrl] = buildEndpointCandidates(endpoint, "/api/chat");
 
     const taskClone = { ...task } as Record<string, any>;
     const history = Array.isArray(taskClone.session_history) ? taskClone.session_history : [];
@@ -112,7 +125,8 @@ export class OllamaProvider extends ResilientProvider {
 
     const streamEnabled =
       typeof task._stream_enabled === "boolean" ? task._stream_enabled : Boolean(providerConfig.stream ?? cfg.get("stream", true));
-    const thinkEnabled = Boolean(cfg.get("think_mode", false));
+    const thinkingEnabled = typeof providerConfig.thinking === "boolean" ? providerConfig.thinking : true;
+    const thinkEnabled = thinkingEnabled && Boolean(cfg.get("think_mode", false));
 
     const payload = {
       model: String(providerConfig.model || "qwen3:14b"),
@@ -123,7 +137,7 @@ export class OllamaProvider extends ResilientProvider {
       context: cachedContext.length ? cachedContext : undefined,
     };
 
-    const postChat = async (body: Record<string, unknown>) =>
+    const postChat = async (url: string, body: Record<string, unknown>) =>
       axios.post(url, body, {
         headers: { "content-type": "application/json" },
         signal: opts?.cancelSignal,
@@ -133,14 +147,32 @@ export class OllamaProvider extends ResilientProvider {
       });
 
     let response: import("axios").AxiosResponse;
+    let activeUrl = primaryUrl;
     try {
-      response = await postChat(payload as Record<string, unknown>);
+      response = await postChat(activeUrl, payload as Record<string, unknown>);
     } catch (e: any) {
       const errStr = String(e);
       if (errStr.includes("ECONNREFUSED") || errStr.includes("AggregateError")) {
         throw new Error(`Could not connect to Ollama at ${endpoint}. Is the Ollama app running?`);
       }
       throw new Error(`Ollama connection error: ${errStr}`);
+    }
+
+    if (
+      fallbackUrl &&
+      (response.status === 404 || response.status === 405) &&
+      !isModelNotFoundResponse(response.status, response.data)
+    ) {
+      try {
+        activeUrl = fallbackUrl;
+        response = await postChat(activeUrl, payload as Record<string, unknown>);
+      } catch (e: any) {
+        const errStr = String(e);
+        if (errStr.includes("ECONNREFUSED") || errStr.includes("AggregateError")) {
+          throw new Error(`Could not connect to Ollama at ${endpoint}. Is the Ollama app running?`);
+        }
+        throw new Error(`Ollama connection error: ${errStr}`);
+      }
     }
 
     // Some Ollama/chat combinations 500 with cached context or aggressive options.
@@ -150,7 +182,7 @@ export class OllamaProvider extends ResilientProvider {
       delete (safeOptions as Record<string, unknown>).num_ctx;
       delete (safeOptions as Record<string, unknown>).num_predict;
       try {
-        const retried = await postChat({
+        const retried = await postChat(activeUrl, {
           model: String(providerConfig.model || "qwen3:14b"),
           messages,
           stream: Boolean(streamEnabled),
@@ -187,12 +219,17 @@ export class OllamaProvider extends ResilientProvider {
           const trimmed = line.trim();
           if (!trimmed) return;
           opts?.onStreamActivity?.();
-          const parsed = JSON.parse(trimmed) as any;
+          let parsed: any;
+          try {
+            parsed = JSON.parse(trimmed);
+          } catch {
+            return; // ignore malformed chunks
+          }
           const chunk = parsed?.message?.content || parsed?.response || "";
 
           const chunkThinking = extractThinkingLike(parsed);
 
-          if (chunkThinking) {
+          if (thinkingEnabled && chunkThinking) {
             if (!startedThinking) {
               startedThinking = true;
               const openPattern = "<think>\n";
@@ -203,7 +240,7 @@ export class OllamaProvider extends ResilientProvider {
             if (opts?.streamCallback) opts.streamCallback(chunkThinking);
           }
 
-          if (startedThinking && !endedThinking && chunk) {
+          if (thinkingEnabled && startedThinking && !endedThinking && chunk) {
             endedThinking = true;
             const closePattern = "\n</think>\n";
             fullContent += closePattern;
@@ -222,7 +259,7 @@ export class OllamaProvider extends ResilientProvider {
           }
 
           if (parsed?.done) {
-            if (startedThinking && !endedThinking) {
+            if (thinkingEnabled && startedThinking && !endedThinking) {
               endedThinking = true;
               const closePattern = "\n</think>\n";
               fullContent += closePattern;
@@ -255,7 +292,7 @@ export class OllamaProvider extends ResilientProvider {
       const chunk = String(parsed?.message?.content || parsed?.response || "");
       const chunkThinking = extractThinkingLike(parsed);
 
-      if (chunkThinking) {
+      if (thinkingEnabled && chunkThinking) {
         fullContent = `<think>\n${chunkThinking}\n</think>\n${chunk}`;
       } else {
         fullContent = chunk;
@@ -275,7 +312,7 @@ export class OllamaProvider extends ResilientProvider {
     return {
       text: split.content,
       usage,
-      thinking: split.thinking,
+      thinking: thinkingEnabled ? split.thinking : "",
       provider_state: responseContext.length ? { ollama_context: responseContext } : undefined,
     };
   }
@@ -284,10 +321,17 @@ export class OllamaProvider extends ResilientProvider {
     const providerConfig = cfg.getProviderConfig("ollama");
     const endpoint = normalizeEndpoint(String(providerConfig.endpoint || "http://localhost:11434"));
     try {
-      const response = await axios.get(`${endpoint}/api/tags`, {
+      const [primaryUrl, fallbackUrl] = buildEndpointCandidates(endpoint, "/api/tags");
+      let response = await axios.get(primaryUrl, {
         timeout: 5000,
         validateStatus: () => true,
       });
+      if (fallbackUrl && (response.status === 404 || response.status === 405)) {
+        response = await axios.get(fallbackUrl, {
+          timeout: 5000,
+          validateStatus: () => true,
+        });
+      }
       if (response.status < 200 || response.status >= 300) {
         throw new Error(`${response.status} ${response.statusText}`);
       }

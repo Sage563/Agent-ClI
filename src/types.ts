@@ -1,3 +1,19 @@
+export type ToolPermission = "allow" | "deny" | "ask";
+
+export type ToolPermissions = {
+  bash?: ToolPermission;
+  edit?: ToolPermission;
+  read?: ToolPermission;
+  grep?: ToolPermission;
+  glob?: ToolPermission;
+  lsp?: ToolPermission;
+  webfetch?: ToolPermission;
+  websearch?: ToolPermission;
+  todowrite?: ToolPermission;
+  todoread?: ToolPermission;
+  [key: string]: ToolPermission | undefined;
+};
+
 export type Usage = {
   input_tokens: number;
   output_tokens: number;
@@ -104,6 +120,7 @@ export type ProviderConfig = {
   generation?: Record<string, unknown>;
   stream?: boolean;
   stream_print?: boolean;
+  thinking?: boolean;
   [key: string]: unknown;
 };
 
@@ -132,6 +149,7 @@ export type ConfigShape = {
   disable_timeout_retry?: boolean;
   stream_render_fps?: number;
   mission_render_fps?: number;
+  tui_enabled?: boolean;
   command_timeout_ms?: number;
   command_log_enabled?: boolean;
   strict_edit_requires_full_access?: boolean;
@@ -141,10 +159,14 @@ export type ConfigShape = {
   auto_compact_enabled?: boolean;
   auto_compact_threshold_pct?: number;
   auto_compact_keep_recent_turns?: number;
+  context_extension?: boolean;
   run_policy?: "ask" | "always" | "never";
   theme_mode?: "dark" | "white" | "follow_windows";
   onboarding_completed?: boolean;
   access_scope?: "limited" | "full_desktop";
+  lsp_enabled?: boolean;
+  lsp_servers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  permissions?: ToolPermissions;
   [key: string]: unknown;
 };
 

@@ -22,6 +22,15 @@ export const KNOWN_MODELS: Record<string, string[]> = {
     "google/gemma-2-9b-it",
     "meta-llama/Llama-2-7b-chat-hf",
   ],
+  openrouter: [
+    "anthropic/claude-sonnet-4-20250514",
+    "openai/gpt-4o",
+    "google/gemini-2.5-pro-preview-06-05",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-chat",
+  ],
+  xai: ["grok-3", "grok-3-mini", "grok-2"],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
 };
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
@@ -48,6 +57,15 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "Qwen/Qwen2.5-72B-Instruct": 32768,
   "google/gemma-2-9b-it": 8192,
   "microsoft/Phi-3-mini-4k-instruct": 4096,
+  // xAI
+  "grok-3": 131072,
+  "grok-3-mini": 131072,
+  "grok-2": 131072,
+  // Groq
+  "llama-3.3-70b-versatile": 128000,
+  "llama-3.1-8b-instant": 128000,
+  "mixtral-8x7b-32768": 32768,
+  "gemma2-9b-it": 8192,
 };
 
 function parseDotEnv(text: string) {
@@ -112,6 +130,9 @@ export class Config {
       if (typeof this.config.providers[providerName].stream_print !== "boolean") {
         this.config.providers[providerName].stream_print = true;
       }
+      if (typeof this.config.providers[providerName].thinking !== "boolean") {
+        this.config.providers[providerName].thinking = true;
+      }
     }
 
     const ollama = this.config.providers.ollama;
@@ -134,6 +155,7 @@ export class Config {
     if (!this.config.reasoning_level) this.config.reasoning_level = "standard";
     if (typeof this.config.stream !== "boolean") this.config.stream = true;
     if (typeof this.config.stream_print !== "boolean") this.config.stream_print = true;
+    if (typeof this.config.tui_enabled !== "boolean") this.config.tui_enabled = true;
     if (typeof this.config.env_bridge_enabled !== "boolean") this.config.env_bridge_enabled = true;
     if (typeof this.config.stream_timeout_ms !== "number" && this.config.stream_timeout_ms !== false) {
       this.config.stream_timeout_ms = false;
@@ -152,7 +174,11 @@ export class Config {
     if (typeof this.config.auto_compact_enabled !== "boolean") this.config.auto_compact_enabled = true;
     if (typeof this.config.auto_compact_threshold_pct !== "number") this.config.auto_compact_threshold_pct = 90;
     if (typeof this.config.auto_compact_keep_recent_turns !== "number") this.config.auto_compact_keep_recent_turns = 8;
+    if (typeof this.config.context_extension !== "boolean") this.config.context_extension = true;
     if (!this.config.run_policy) this.config.run_policy = "ask";
+    if (typeof this.config.lsp_enabled !== "boolean") this.config.lsp_enabled = false;
+    if (!this.config.lsp_servers) this.config.lsp_servers = {};
+    if (!this.config.permissions) this.config.permissions = {};
   }
 
   private applyEnvBridge() {
@@ -240,6 +266,9 @@ export class Config {
       gemini: { model: "GEMINI_MODEL", endpoint: "GEMINI_ENDPOINT", key: "GEMINI_API_KEY" },
       deepseek: { model: "DEEPSEEK_MODEL", endpoint: "DEEPSEEK_ENDPOINT", key: "DEEPSEEK_API_KEY" },
       hf: { model: "HUGGINGFACE_MODEL", endpoint: "HUGGINGFACE_ENDPOINT", key: "HUGGINGFACE_API_KEY" },
+      openrouter: { model: "OPENROUTER_MODEL", endpoint: "OPENROUTER_ENDPOINT", key: "OPENROUTER_API_KEY" },
+      xai: { model: "XAI_MODEL", endpoint: "XAI_ENDPOINT", key: "XAI_API_KEY" },
+      groq: { model: "GROQ_MODEL", endpoint: "GROQ_ENDPOINT", key: "GROQ_API_KEY" },
     };
 
     for (const provider of Object.keys(byProvider)) {
@@ -327,7 +356,7 @@ export class Config {
   }
 
   getEndpoint(providerName: string): string {
-    return this.getProviderConfig(providerName).endpoint || "";
+    return this.getProviderConfig(providerName).model || "";
   }
 
   setEndpoint(providerName: string, endpoint: string) {

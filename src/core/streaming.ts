@@ -81,7 +81,6 @@ export class StreamingJsonObserver {
     ask_user: false,
   };
   private seenFiles = new Set<string>();
-  private seenSchemaKeys = new Set<string>();
   private seenToolKeys = new Set<string>();
 
   constructor(
@@ -110,64 +109,7 @@ export class StreamingJsonObserver {
     return delta;
   }
 
-  private discoverSchemaKeys() {
-    const newKeys: string[] = [];
-    let inString = false;
-    let escaped = false;
-    let objectDepth = 0;
-    let arrayDepth = 0;
 
-    for (let i = 0; i < this.buffer.length; i += 1) {
-      const ch = this.buffer[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch === "\\") {
-          escaped = true;
-          continue;
-        }
-        if (ch === '"') inString = false;
-        continue;
-      }
-
-      if (ch === "{") {
-        objectDepth += 1;
-        continue;
-      }
-      if (ch === "}") {
-        objectDepth = Math.max(0, objectDepth - 1);
-        continue;
-      }
-      if (ch === "[") {
-        arrayDepth += 1;
-        continue;
-      }
-      if (ch === "]") {
-        arrayDepth = Math.max(0, arrayDepth - 1);
-        continue;
-      }
-      if (ch !== '"') continue;
-      inString = true;
-
-      if (objectDepth !== 1 || arrayDepth !== 0) continue;
-
-      const parsed = extractJsonStringAt(this.buffer, i + 1);
-      if (!parsed.complete) continue;
-      const key = decodeJsonStringFragment(parsed.raw, true).trim();
-      i += parsed.raw.length + 1;
-      inString = false;
-
-      let j = i + 1;
-      while (j < this.buffer.length && /\s/.test(this.buffer[j])) j += 1;
-      if (this.buffer[j] !== ":") continue;
-      if (!key || this.seenSchemaKeys.has(key)) continue;
-      this.seenSchemaKeys.add(key);
-      newKeys.push(key);
-    }
-    return newKeys;
-  }
 
   private discoverToolSignals() {
     const signals: string[] = [];
@@ -207,7 +149,7 @@ export class StreamingJsonObserver {
       self_critique: this.emitted.self_critique,
       ask_user: this.emitted.ask_user,
       rawTail: this.buffer.slice(-3000),
-      seenSchemaKeys: [...this.seenSchemaKeys],
+
       seenToolKeys: [...this.seenToolKeys],
     };
   }
@@ -226,7 +168,6 @@ export class StreamingJsonObserver {
     return {
       deltas,
       fileEdits: this.discoverFileEdits(),
-      newSchemaKeys: this.discoverSchemaKeys(),
       toolSignals: this.discoverToolSignals(),
     };
   }

@@ -47,6 +47,7 @@ export class DeepSeekProvider extends ResilientProvider {
     if (!apiKey) throw new Error("DeepSeek API key not found. Use '/config deepseek_api_key <key>'.");
 
     const providerConfig = cfg.getProviderConfig("deepseek");
+    const thinkingEnabled = typeof providerConfig.thinking === "boolean" ? providerConfig.thinking : true;
     const client = new OpenAI({ apiKey, baseURL: "https://api.deepseek.com", timeout: 360000 });
     const messages = buildMessages(system, task);
     const streamEnabled =
@@ -73,7 +74,7 @@ export class DeepSeekProvider extends ResilientProvider {
         }
         const delta = event?.choices?.[0]?.delta;
 
-        if (delta?.reasoning_content) {
+        if (thinkingEnabled && delta?.reasoning_content) {
           if (!startedThinking) {
             startedThinking = true;
             const openPattern = "<think>\n";
@@ -85,7 +86,7 @@ export class DeepSeekProvider extends ResilientProvider {
         }
 
         if (delta?.content) {
-          if (startedThinking && !endedThinking) {
+          if (thinkingEnabled && startedThinking && !endedThinking) {
             endedThinking = true;
             const closePattern = "\n</think>\n";
             reasoningChunks.push(closePattern);
@@ -96,12 +97,12 @@ export class DeepSeekProvider extends ResilientProvider {
         }
       }
       // Final close if needed
-      if (startedThinking && !endedThinking) {
+      if (thinkingEnabled && startedThinking && !endedThinking) {
         const closePattern = "\n</think>\n";
         reasoningChunks.push(closePattern);
         if (opts?.streamCallback) opts.streamCallback(closePattern);
       }
-      return { text: chunks.join(""), usage, thinking: reasoningChunks.join("") };
+      return { text: chunks.join(""), usage, thinking: thinkingEnabled ? reasoningChunks.join("") : "" };
     }
 
     const response = await client.chat.completions.create({
@@ -116,7 +117,7 @@ export class DeepSeekProvider extends ResilientProvider {
         input_tokens: response.usage?.prompt_tokens || 0,
         output_tokens: response.usage?.completion_tokens || 0,
       },
-      thinking: String((message as any)?.reasoning_content || ""),
+      thinking: thinkingEnabled ? String((message as any)?.reasoning_content || "") : "",
     };
   }
 

@@ -1,4 +1,5 @@
 import fs from "fs-extra";
+import { exec } from "child_process";
 import os from "os";
 import path from "path";
 import { registry } from "./registry";
@@ -30,13 +31,13 @@ registry.register("/help", "Show available commands")(async (_, args) => {
   }
 
   const categories: Record<string, Set<string>> = {
-    General: new Set(["/help", "/commands", "/exit", "/cls", "/cd", "/read", "/ls", "/tree", "/undo", "/see", "/search", "/list_diff"]),
-    "AI & Context": new Set(["/model", "/provider", "/think", "/compact", "/cost", "/unlimited", "/status", "/skills", "/assist"]),
+    General: new Set(["/help", "/commands", "/exit", "/cls", "/clear", "/cd", "/read", "/open", "/ls", "/files", "/tree", "/undo", "/see", "/search", "/list_diff", "/run"]),
+    "AI & Context": new Set(["/model", "/provider", "/think", "/compact", "/cost", "/unlimited", "/status", "/skills", "/assist", "/connect"]),
     "Git Integration": new Set(["/diff", "/review", "/commit", "/pr"]),
     "Intelligence & Ops": new Set(["/index", "/lint", "/scan", "/intel"]),
     Configuration: new Set(["/config", "/timeout"]),
     Modes: new Set(["/fast", "/plan", "/mission", "/voice"]),
-    "Session & Dev": new Set(["/session", "/reset", "/mcp", "/debug", "/code", "/init"]),
+    "Session & Dev": new Set(["/session", "/reset", "/mcp", "/debug", "/code", "/init", "/share"]),
     Runtime: new Set(["/checkpoint", "/resume", "/budget", "/ps", "/kill", "/logs", "/access"]),
   };
 
@@ -122,7 +123,7 @@ registry.register("/exit", "Exit the agent", ["/quit"])(() => {
   process.exit(0);
 });
 
-registry.register("/cls", "Clear the terminal screen", ["/clear_screen"])(() => {
+registry.register("/cls", "Clear the terminal screen", ["/clear_screen", "/clear"])(() => {
   clearScreen();
   return true;
 });
@@ -265,7 +266,7 @@ registry.register("/cost", "Show session token usage, cost, and time", ["/stats"
   return true;
 });
 
-registry.register("/read", "Read a file into the console")((_, args) => {
+registry.register("/read", "Read a file into the console", ["/open"])((_, args) => {
   if (args.length < 2) {
     printError("Usage: /read <path>");
     return true;
@@ -296,7 +297,7 @@ registry.register("/read", "Read a file into the console")((_, args) => {
   return true;
 });
 
-registry.register("/ls", "List directory contents")((_, args) => {
+registry.register("/ls", "List directory contents", ["/files"])((_, args) => {
   const target = args.length > 1 ? args.slice(1).join(" ") : ".";
   const p = path.resolve(process.cwd(), target);
   if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) {
@@ -309,6 +310,26 @@ registry.register("/ls", "List directory contents")((_, args) => {
     .map((entry) => `${entry.name}${entry.isDirectory() ? "/" : ""}`);
   printPanel(items.length ? items.join("\n") : "(empty)", p, "cyan");
   return true;
+});
+
+registry.register("/run", "Run a shell command")((_ , args) => {
+  const cmd = args.slice(1).join(" ").trim();
+  if (!cmd) {
+    printError("Usage: /run <command>");
+    return true;
+  }
+  const timeoutRaw = Number(cfg.get("command_timeout_ms", 30_000));
+  const timeoutUnlimited = !Number.isFinite(timeoutRaw) || timeoutRaw <= 0;
+  return new Promise<boolean>((resolve) => {
+    const execOptions = timeoutUnlimited ? {} : { timeout: Math.floor(timeoutRaw) };
+    const child = exec(cmd, execOptions, (error, stdout, stderr) => {
+      if (stdout) printInfo(stdout);
+      if (stderr) printWarning(stderr);
+      if (error) printError(`Command failed: ${error.message}`);
+      resolve(true);
+    });
+    child.on("error", () => resolve(true));
+  });
 });
 
 registry.register("/image", "Display an image in the console")((_, args) => {

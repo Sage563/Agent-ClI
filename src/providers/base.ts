@@ -139,6 +139,7 @@ export async function executeWithTimeout<T>(
   fn: () => Promise<T>,
   timeoutMs: number
 ): Promise<T> {
+  if (timeoutMs <= 0) return fn();
   return Promise.race([
     fn(),
     new Promise<T>((_, reject) =>
@@ -373,8 +374,14 @@ export abstract class ResilientProvider {
     task: TaskPayload,
     opts?: ProviderCallOptions
   ): Promise<ProviderResult> {
-    const timeoutMs = opts?.timeoutMs ?? this.config.timeout;
-    const retryOptions = opts?.retryOptions ?? { maxRetries: this.config.maxRetries };
+    let timeoutMs = opts?.timeoutMs ?? this.config.timeout;
+    let retryOptions = opts?.retryOptions ?? { maxRetries: this.config.maxRetries };
+
+    if (task._stream_enabled === true) {
+      // Force unlimited timeout for streaming to prevent "invalidation".
+      // We keep the retry options as-is (or let config decide) to handle transient connection drops.
+      timeoutMs = 0;
+    }
 
     if (!this.healthCheck.isHealthy(this.name)) {
       this.logger.warn("Provider health check unhealthy", { provider: this.name });

@@ -6,6 +6,8 @@ import readline from "readline";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import { cfg } from "../config";
+import { appendChat, appendTool, isTuiEnabled, setStatus, teardownTui, clearTui } from "./tui";
+export { isTuiEnabled, appendChat, setStatus, teardownTui, clearTui };
 import { getActiveSessionName } from "../memory";
 
 marked.setOptions({
@@ -21,12 +23,13 @@ const termOpts = markedTerminal({
     return Math.max(40, (process.stdout.columns || 80) - 4);
   },
   codespan: (text: string) => chalk.bgGray.black(text),
-  code: (text: string) => colorByName(THEME.accent || "cyan")(text),
-  firstHeading: (text: string) => chalk.bold(colorByName(THEME.primary || "cyan")(text)),
-  heading: (text: string) => chalk.bold(colorByName(THEME.secondary || "magenta")(text)),
-  strong: (text: string) => chalk.bold(colorByName(THEME.warning || "yellow")(text)),
-  em: (text: string) => chalk.italic(colorByName(THEME.dim || "gray")(text)),
-  href: (text: string) => chalk.underline(colorByName(THEME.accent || "cyan")(text)),
+  code: (text: string) => themeColor(THEME.accent)(text),
+  firstHeading: (text: string) => chalk.bold(themeColor(THEME.primary)(`> ${text}`)),
+  heading: (text: string) => chalk.bold(themeColor(THEME.secondary)(`- ${text}`)),
+  strong: (text: string) => chalk.bold.cyan(text),
+  em: (text: string) => chalk.italic.gray(text),
+  href: (text: string) => chalk.underline.magenta(text),
+  listitem: (text: string) => `* ${text}`,
 });
 
 marked.use(termOpts);
@@ -133,9 +136,13 @@ export function themeBgColor(name?: string) {
 
 function renderMarkdown(content: string) {
   try {
-    return marked.parse(content || "") as string;
+    const raw = String(content || "");
+    if (!raw.trim()) return "";
+    // Avoid blowing the stack on extremely large or pathological inputs.
+    if (raw.length > 40000) return raw;
+    return marked.parse(raw) as string;
   } catch {
-    return content || "";
+    return String(content || "");
   }
 }
 
@@ -143,6 +150,20 @@ function normalizeResponseText(content: string) {
   return String(content || "")
     .replace(/\r\n/g, "\n")
     .replace(/\u0000/g, "");
+}
+
+function stripUiInstructionNoise(content: string) {
+  const raw = String(content || "");
+  if (!raw.trim()) return raw;
+  const lines = raw.split(/\r?\n/);
+  const filtered = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    if (/^Output format\s*:/i.test(trimmed)) return false;
+    if (/^Return strict JSON only/i.test(trimmed)) return false;
+    return true;
+  });
+  return filtered.join("\n").trim();
 }
 
 function styleMarkdownLine(content: string, colorName?: string) {
@@ -196,10 +217,19 @@ export function renderPanel(content: string, title = "", style?: string, _fullWi
 }
 
 export function printPanel(content: string, title = "", style?: string, fullWidth = false, fullHeight = false, boxed = false) {
+  if (isTuiEnabled()) {
+    const rendered = renderPanel(content, title, style, fullWidth, fullHeight, boxed);
+    appendChat(rendered);
+    return;
+  }
   console.log(renderPanel(content, title, style, fullWidth, fullHeight, boxed));
 }
 
 export function printError(msg: string) {
+  if (isTuiEnabled()) {
+    appendChat(styleMarkdownLine(`Error: ${msg}`, THEME.error));
+    return;
+  }
   console.error(styleMarkdownLine(`Error: ${msg}`, THEME.error));
 }
 
@@ -232,25 +262,41 @@ export async function printImage(filePath: string) {
 }
 
 export function printSuccess(msg: string) {
+  if (isTuiEnabled()) {
+    appendChat(styleMarkdownLine(msg, THEME.success));
+    return;
+  }
   console.log(styleMarkdownLine(msg, THEME.success));
 }
 
 export function printInfo(msg: string) {
+  if (isTuiEnabled()) {
+    appendChat(styleMarkdownLine(msg, THEME.accent));
+    return;
+  }
   console.log(styleMarkdownLine(msg, THEME.accent));
 }
 
 export function printWarning(msg: string) {
+  if (isTuiEnabled()) {
+    appendChat(styleMarkdownLine(`Warning: ${msg}`, THEME.warning));
+    return;
+  }
   console.log(styleMarkdownLine(msg, THEME.warning));
 }
 
 export function printActivity(text: string) {
+  if (isTuiEnabled()) {
+    setStatus(text);
+    appendTool(text);
+    return;
+  }
   if (PROMPT_INPUT_ACTIVE) return;
   if (MISSION_ACTIVITY_SINK) {
     MISSION_ACTIVITY_SINK(text);
     return;
   }
-  // Use unique ID to allow updating the same activity line
-  logUpdate(`\x1b[36mActivity:\x1b[0m ${text}`);
+  process.stdout.write(chalk.cyan(`[BUSY] `) + text + "\n");
 }
 
 export function printRule(label = "", style?: string) {
@@ -264,7 +310,18 @@ export function printRule(label = "", style?: string) {
 export const consoleApi = {
   log: (...args: unknown[]) => globalThis.console.log(...args),
   error: (...args: unknown[]) => globalThis.console.error(...args),
-  print: (msg: string) => globalThis.console.log(renderMarkdown(normalizeResponseText(msg))),
+  print: (msg: string) => {
+    const normalized = stripUiInstructionNoise(normalizeResponseText(msg));
+    if (isTuiEnabled()) {
+      appendChat(normalized);
+      return;
+    }
+    try {
+      globalThis.console.log(renderMarkdown(normalized));
+    } catch {
+      globalThis.console.log(normalized);
+    }
+  },
   input: async (promptText: string) => {
     // Avoid readline prompt corruption when any live logUpdate animation is active.
     try {
@@ -301,6 +358,10 @@ export const consoleUI = consoleApi;
 export const console = consoleApi;
 
 export function clearScreen() {
+  if (isTuiEnabled()) {
+    clearTui();
+    return;
+  }
   logUpdate.clear();
   process.stdout.write("\x1Bc");
   consoleApi.clear();
@@ -318,12 +379,18 @@ export function startThinking() {
   let frame = 0;
   const chars = 12;
   const equals = 6;
+  const rows = process.stdout.rows || 24;
+  const statusRow = rows - 4; // reserve row above input box
+
   thinkingTimer = setInterval(() => {
     const pos = Math.abs((frame % ((chars - equals) * 2)) - (chars - equals));
     const leftSpace = " ".repeat(pos);
     const rightSpace = " ".repeat(chars - equals - pos);
     const bar = `[${leftSpace}${"=".repeat(equals)}${rightSpace}]`;
-    logUpdate(`${chalk.bold(themeColor(THEME.secondary)("AI THINKING"))} ${chalk.bold(themeColor(THEME.primary)(bar))}`);
+    const text = `${chalk.bold(themeColor(THEME.secondary)("AI THINKING"))} ${chalk.bold(themeColor(THEME.primary)(bar))}`;
+
+    // Position cursor and write
+    process.stdout.write(`\x1b[${statusRow};1H\x1b[2K${text}`);
     frame += 1;
   }, 100);
 }
@@ -332,7 +399,9 @@ export function stopThinking() {
   if (thinkingTimer) {
     clearInterval(thinkingTimer);
     thinkingTimer = null;
-    logUpdate.clear();
+    const rows = process.stdout.rows || 24;
+    const statusRow = rows - 4;
+    process.stdout.write(`\x1b[${statusRow};1H\x1b[2K`);
   }
 }
 
@@ -380,6 +449,10 @@ export class MissionBoard {
     this.renderIntervalMs = Math.max(16, Math.floor(1000 / fps));
     if (process.stdout.isTTY) {
       this.renderTimer = setInterval(() => {
+        if (!this.streaming) {
+          if (this.liveDirty) this.renderLive(false, true);
+          return;
+        }
         this.spinnerFrameIdx = (this.spinnerFrameIdx + 1) % this.spinnerFrames.length;
         this.renderLive(true);
       }, this.renderIntervalMs);
@@ -405,6 +478,12 @@ export class MissionBoard {
     const nextStatusStyle = String(args.status_style || this.statusStyle || THEME.primary);
     const hasNewStatus = Boolean(args.status) && nextStatus !== this.status && !isTransientStatus(nextStatus);
     const hasNewLog = Boolean(args.log) && args.log !== this.logs[this.logs.length - 1];
+    const normalizedNext = normalizeStatus(nextStatus);
+    if (normalizedNext === "STREAMING" || normalizedNext === "STREAM EDITING" || normalizedNext === "THINKING...") {
+      this.streaming = true;
+    } else if (args.status) {
+      this.streaming = false;
+    }
 
     // Check if a task was just finished
     let taskFinishedText = "";
@@ -437,21 +516,23 @@ export class MissionBoard {
 
     const permanentLines: string[] = [];
     if (taskFinishedText) {
-      permanentLines.push(chalk.green(`(v) Task Completed: ${taskFinishedText}`));
+      permanentLines.push(chalk.green(`[DONE] Task: ${taskFinishedText}`));
     }
     if (hasNewStatus) {
-      permanentLines.push(chalk.bold(themeColor(nextStatusStyle)(`[MISSION STATUS] ${this.status}`)));
+      permanentLines.push(chalk.bold(themeColor(nextStatusStyle)(`[*] ${this.status}`)));
     }
     if (hasNewLog && args.log) {
       this.logs.push(args.log);
-      permanentLines.push(themeColor(THEME.dim)(` \u2022 ${args.log}`));
+      permanentLines.push(themeColor(THEME.dim)(` - ${args.log}`));
       if (this.logs.length > 100) this.logs.shift();
     }
 
     if (permanentLines.length > 0) {
       this.clearLiveArea();
-      for (const line of permanentLines) {
-        console.log(line);
+      if (!isTuiEnabled()) {
+        for (const line of permanentLines) {
+          console.log(line);
+        }
       }
     }
     this.renderLive();
@@ -459,28 +540,36 @@ export class MissionBoard {
 
   private clearLiveArea() {
     if (!this.liveActive) return;
-    logUpdate.clear();
+    const rows = process.stdout.rows || 24;
+    // We don't know exactly how many lines were there, so we clear the max possible (progress + status)
+    process.stdout.write(`\x1b[${rows - 4};1H\x1b[2K`);
+    process.stdout.write(`\x1b[${rows - 5};1H\x1b[2K`);
     this.liveActive = false;
   }
 
-  private renderLive(tick = false) {
-    if (PROMPT_INPUT_ACTIVE) return;
+  getHeight() {
+    let h = 0;
+    if (this.tasks.length > 0) h += 1; // Progress bar
+    if (this.liveText) h += 1; // Status/Live text
+    return h;
+  }
+
+  private renderLive(tick = false, force = false) {
+    if (PROMPT_INPUT_ACTIVE && !force) return;
     if (tick && !this.liveDirty && !this.liveText) return;
 
     const liveLines: string[] = [];
     if (this.tasks.length > 0) {
       const done = this.tasks.filter((t) => t.done).length;
-      const progress = this.renderProgressBar(done, this.tasks.length, 20);
-      liveLines.push(chalk.bold(`Task Progress: ${progress}`));
+      const progress = this.renderProgressBar(done, this.tasks.length, 24);
+      liveLines.push(chalk.bold(" \u2503 ") + chalk.white("Progress: ") + progress);
     }
     if (this.liveText) {
       const waitingForUser = String(this.status || "").trim().toUpperCase() === "WAITING FOR USER";
-      if (waitingForUser) {
-        liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText}`));
-      } else {
-        const frame = this.spinnerFrames[this.spinnerFrameIdx % this.spinnerFrames.length];
-        liveLines.push(themeColor(THEME.accent || "cyan")(` \u2022 ${this.liveText} ${frame}`));
-      }
+      const frame = this.spinnerFrames[this.spinnerFrameIdx % this.spinnerFrames.length];
+      const text = waitingForUser ? this.liveText : `${this.liveText} ${frame}`;
+      const statusColor = waitingForUser ? THEME.warning : (THEME.accent || "cyan");
+      liveLines.push(chalk.bold(" \u2503 ") + themeColor(statusColor)(`Status: ${text}`));
     }
 
     if (liveLines.length === 0) {
@@ -488,9 +577,26 @@ export class MissionBoard {
       this.liveDirty = false;
       return;
     }
-    logUpdate(liveLines.join("\n"));
+
+    const rows = process.stdout.rows || 24;
+    const startRow = rows - (liveLines.length - 1);
+
+    // Position cursor and write each line
+    for (let i = 0; i < liveLines.length; i++) {
+      const row = startRow + i;
+      if (row > 0 && row <= rows) {
+        if (!isTuiEnabled()) {
+          process.stdout.write(`\x1b[${row};1H\x1b[2K${liveLines[i]}`);
+        }
+      }
+    }
+
     this.liveActive = true;
     this.liveDirty = false;
+  }
+
+  refresh() {
+    this.renderLive(false, true);
   }
 
   private shouldLogProgress(newTasks: Array<{ text: string; done?: boolean }>) {
@@ -500,8 +606,10 @@ export class MissionBoard {
     return totalDone > oldDone || newTasks.length !== this.tasks.length;
   }
 
-  setStreaming(_active: boolean) {
-    // No-op for appended mode
+  setStreaming(active: boolean) {
+    this.streaming = Boolean(active);
+    this.liveDirty = true;
+    this.renderLive(false, true);
   }
 
   setProgressDone(doneCount: number) {
@@ -521,17 +629,20 @@ export class MissionBoard {
       const total = this.tasks.length;
       const done = this.tasks.filter(t => t.done).length;
       const progress = this.renderProgressBar(done, total, 20);
-      console.log(chalk.green(`\u2713 Task Completed: ${this.tasks[taskIndex].text}`));
-      console.log(chalk.bold(`Task Progress: ${progress} (${done}/${total})`));
+      if (!isTuiEnabled()) {
+        console.log(chalk.green(`✅ Task Completed: ${this.tasks[taskIndex].text}`));
+        console.log(chalk.bold(`Task Progress: ${progress} (${done}/${total})`));
+      }
     }
   }
 
   private renderProgressBar(done: number, total: number, width = 20) {
-    if (total <= 0) return chalk.dim("Wait for tasks...");
+    if (total <= 0) return chalk.dim("Initializing...");
     const ratio = Math.max(0, Math.min(1, done / total));
     const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
-    const bar = themeColor(THEME.success)("\u2501".repeat(filled)) + chalk.dim("\u2501".repeat(Math.max(0, width - filled)));
-    return `${bar} ${Math.round(ratio * 100)}% (${done}/${total})`;
+    const bar = themeColor(THEME.success)("\u2588".repeat(filled)) + chalk.gray("\u2591".repeat(Math.max(0, width - filled)));
+    const percent = chalk.bold(themeColor(THEME.success)(`${Math.round(ratio * 100)}%`));
+    return `${bar} ${percent} (${done}/${total})`;
   }
 
   flush() {
@@ -571,9 +682,11 @@ export async function promptMissionReply(question: string) {
 export function streamJsonField(fieldName: string, value: unknown, style?: string) {
   const color = colorByName(style || THEME.primary);
   const text = typeof value === "string" ? value : JSON.stringify(value);
-  process.stdout.write(color(`"${fieldName}": `));
-  process.stdout.write(text);
-  process.stdout.write("\n");
+  if (!isTuiEnabled()) {
+    process.stdout.write(color(`"${fieldName}": `));
+    process.stdout.write(text);
+    process.stdout.write("\n");
+  }
 }
 
 export function printSessionStats(stats: Record<string, unknown>) {
@@ -592,22 +705,45 @@ export function printSessionStats(stats: Record<string, unknown>) {
     table.push(["Context Left", String(stats.context_left || 0)]);
   }
   table.push(["Total Cost", `$${Number(stats.total_cost || 0).toFixed(4)}`]);
-  console.log(`\n${table.toString()}\n`);
+  if (!isTuiEnabled()) {
+    console.log(`\n${table.toString()}\n`);
+  }
 }
 
 export function getToolbar() {
   const sessionName = getActiveSessionName();
   const provider = cfg.getActiveProvider();
-  const planning = cfg.isPlanningMode() ? ` ${chalk.bold.yellow("PLAN")}` : "";
-  const fast = cfg.isFastMode() ? ` ${chalk.bold.cyan("FAST")}` : "";
-  const see = cfg.isSeeMode() ? ` ${chalk.bold.magenta("SEE")}` : "";
-  const policy = ` ${chalk.bold.blue("RUN:" + cfg.getRunPolicy().toUpperCase())}`;
+  const model = String(cfg.getModel(provider) || "default").split("/").pop() || "default";
+  const truncModel = model.length > 20 ? model.slice(0, 17) + "..." : model;
+
+  // Agent badge
+  let agentBadge = "";
+  try {
+    const { getActiveAgentName } = require("../core/agents");
+    const agentName = getActiveAgentName();
+    if (agentName === "plan") {
+      agentBadge = chalk.bold.bgBlue.white(` PLAN `) + " ";
+    } else if (agentName === "explore") {
+      agentBadge = chalk.bold.bgMagenta.white(` EXPLORE `) + " ";
+    } else {
+      agentBadge = chalk.bold.bgGreen.black(` BUILD `) + " ";
+    }
+  } catch { agentBadge = ""; }
+
+  const mode = cfg.isFastMode() ? chalk.bold.cyan(" FAST") : "";
+  const see = cfg.isSeeMode() ? chalk.bold.magenta(" SEE") : "";
 
   const providerStyle = chalk.bold(themeColor(THEME.success)(provider));
-  const text = ` CFG Provider: ${providerStyle} \u2022 Session: ${chalk.cyan(sessionName)}${planning}${fast}${see}${policy} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
+  const modelStyle = chalk.dim(`(${truncModel})`);
+
+  const text = ` ${agentBadge}${providerStyle} ${modelStyle} | ${chalk.cyan(sessionName)}${mode}${see} | Tab:agent @:files !:shell /help `;
 
   const cols = process.stdout.columns || 80;
-  const plainText = ` CFG Provider: ${provider} \u2022 Session: ${sessionName}${planning.replace(/\u001b\[.*?m/g, "")}${fast.replace(/\u001b\[.*?m/g, "")}${see.replace(/\u001b\[.*?m/g, "")}${policy.replace(/\u001b\[.*?m/g, "")} \u2022 F6 IDE \u2022 @ context picker \u2022 /help `;
+  // Calculate plain text length for padding
+  const plainBadge = agentBadge.replace(/\u001b\[.*?m/g, "");
+  const plainMode = mode.replace(/\u001b\[.*?m/g, "");
+  const plainSee = see.replace(/\u001b\[.*?m/g, "");
+  const plainText = ` ${plainBadge}${provider} (${truncModel}) | ${sessionName}${plainMode}${plainSee} | Tab:agent @:files !:shell /help `;
   const padding = Math.max(0, cols - plainText.length);
 
   const bg = themeBgColor("dim" as any) || chalk.bgGray;
@@ -618,15 +754,18 @@ export function getToolbar() {
  * Sets the terminal scrolling region to exclude the last line.
  * This allows a persistent toolbar at the very bottom.
  */
-export function setupScrollRegion() {
+export function setupScrollRegion(reservedRows = 5) {
   const rows = process.stdout.rows || 24;
-  if (rows > 2) {
-    const availableRows = rows - 1; // reserve 1 for toolbar
-    // If current output is very short, don't force a region that might trigger jumps.
-    // We only set the region once we have enough content to scroll or when needed.
+  if (reservedRows <= 0) {
+    // Reset to full screen
+    process.stdout.write("\x1b[r");
+    return;
+  }
+  if (rows > 10) {
+    const availableRows = Math.max(1, rows - reservedRows);
     process.stdout.write(`\x1b[1;${availableRows}r`);
-    // Do not force cursor to bottom; let it stay where it is.
-    // But ensure it's not below the region if we just set it.
+    // Position cursor at the very last visible line of the scroll region
+    process.stdout.write(`\x1b[${availableRows};1H`);
   }
 }
 
@@ -635,4 +774,187 @@ export function setupScrollRegion() {
  */
 export function resetScrollRegion() {
   process.stdout.write("\x1b[r");
+}
+
+/**
+ * Print formatted tool result with bordered output.
+ */
+export function printToolResult(toolName: string, results: string[], maxLines = 15) {
+  const color = colorByName(THEME.accent || "cyan");
+  const dimColor = colorByName(THEME.dim || "gray");
+  
+  if (isTuiEnabled()) {
+    const header = dimColor("[TOOL] ") + color(toolName) + dimColor(` (${results.length})`);
+    const lines = results.slice(0, maxLines);
+    appendTool(header);
+    for (const line of lines) appendTool(`  ${line}`);
+    if (results.length > maxLines) appendTool(dimColor(`  ... and ${results.length - maxLines} more`));
+    return;
+  }
+  const width = Math.max(40, (process.stdout.columns || 80) - 4);
+  const count = results.length;
+  const header = `[TOOL] ${toolName}: ${count} result${count !== 1 ? "s" : ""}`;
+  const headerLine = `\u250C\u2500\u2500 ${color(chalk.bold(header))} ${dimColor("\u2500".repeat(Math.max(0, width - header.length - 5)))}${dimColor("\u2510")}`;
+
+  const lines = results.slice(0, maxLines);
+  const bodyLines = lines.map((line) => {
+    const truncated = line.length > width - 4 ? line.slice(0, width - 7) + "..." : line;
+    return `${dimColor("\u2502")} ${truncated}${" ".repeat(Math.max(0, width - truncated.length - 3))}${dimColor("\u2502")}`;
+  });
+  if (results.length > maxLines) {
+    const moreText = `... and ${results.length - maxLines} more`;
+    bodyLines.push(`${dimColor("\u2502")} ${chalk.dim(moreText)}${" ".repeat(Math.max(0, width - moreText.length - 3))}${dimColor("\u2502")}`);
+  }
+  const footer = `${dimColor("\u2514")}${dimColor("\u2500".repeat(Math.max(0, width - 1)))}${dimColor("\u2518")}`;
+
+  if (!isTuiEnabled()) {
+    console.log(`\n${headerLine}`);
+    for (const line of bodyLines) console.log(line);
+    console.log(footer);
+  }
+}
+
+/**
+ * Print inline diff with colored + / - lines.
+ */
+export function printDiffInline(filePath: string, original: string, edited: string) {
+  const color = colorByName(THEME.accent || "cyan");
+  const baseName = filePath.split(/[\\/]/).pop() || filePath;
+  const header = `\u2500\u2500 ${chalk.bold(baseName)} `;
+  const width = Math.max(40, (process.stdout.columns || 80) - 4);
+  
+  if (isTuiEnabled()) {
+    appendChat(color(`\n\u2500\u2500 ${chalk.bold(baseName)} \u2500\u2500\u2500`));
+  } else {
+    console.log(color(header + "\u2500".repeat(Math.max(0, width - header.length + 5))));
+  }
+
+  const oldLines = (original || "").split("\n");
+  const newLines = (edited || "").split("\n");
+  const contextLines = 3;
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  const diffs: Array<{ type: "context" | "remove" | "add"; line: string }> = [];
+
+  // Simple line-by-line diff
+  let i = 0, j = 0;
+  while (i < oldLines.length || j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+      diffs.push({ type: "context", line: oldLines[i] });
+      i++; j++;
+    } else if (i < oldLines.length && (j >= newLines.length || oldLines[i] !== newLines[j])) {
+      diffs.push({ type: "remove", line: oldLines[i] });
+      i++;
+      if (j < newLines.length) {
+        diffs.push({ type: "add", line: newLines[j] });
+        j++;
+      }
+    } else if (j < newLines.length) {
+      diffs.push({ type: "add", line: newLines[j] });
+      j++;
+    }
+  }
+
+  // Show only context around changes
+  let lastPrintedChange = -999;
+  for (let k = 0; k < diffs.length; k++) {
+    const d = diffs[k];
+    if (d.type !== "context") {
+      // Print context before
+      for (let c = Math.max(lastPrintedChange + 1, k - contextLines); c < k; c++) {
+        if (diffs[c].type === "context") {
+          if (!isTuiEnabled()) console.log(chalk.dim(`  ${diffs[c].line}`));
+        }
+      }
+      if (d.type === "remove") {
+        const outLine = chalk.red(`- ${d.line}`);
+        if (isTuiEnabled()) appendChat(outLine); else console.log(outLine);
+      } else {
+        const outLine = chalk.green(`+ ${d.line}`);
+        if (isTuiEnabled()) appendChat(outLine); else console.log(outLine);
+      }
+      lastPrintedChange = k;
+    } else if (k - lastPrintedChange <= contextLines && lastPrintedChange >= 0) {
+      const outLine = chalk.dim(`  ${d.line}`);
+      if (isTuiEnabled()) appendChat(outLine); else console.log(outLine);
+    } else if (k - lastPrintedChange === contextLines + 1 && lastPrintedChange >= 0) {
+      const remaining = diffs.slice(k).findIndex((dd) => dd.type !== "context");
+      if (remaining > 0) {
+        const outLine = chalk.dim(`  ... (${remaining} lines)`);
+        if (isTuiEnabled()) appendChat(outLine); else console.log(outLine);
+      }
+    }
+  }
+  if (!isTuiEnabled()) console.log("");
+}
+
+/**
+ * Print file operation header with icon and line count.
+ */
+export function printFileHeader(filePath: string, lineCount?: number, icon = "\u2261") {
+  const color = colorByName(THEME.accent || "cyan");
+  const width = Math.max(40, (process.stdout.columns || 80) - 4);
+  const baseName = filePath.split(/[\\/]/).pop() || filePath;
+  const info = lineCount !== undefined ? ` (${lineCount} lines)` : "";
+  const header = `[${icon}] ${baseName}${info}`;
+  
+  if (isTuiEnabled()) {
+    appendChat(color(header));
+  } else {
+    console.log(color(header + " " + "\u2500".repeat(Math.max(0, width - header.length - 1))));
+  }
+}
+
+/**
+ * Print rich mission completion summary.
+ */
+export function printMissionSummary(stats: {
+  tasksCompleted: number;
+  totalTasks: number;
+  durationMs: number;
+  filesModified: string[];
+  filesCreated: string[];
+  commandsRun: number;
+  tokensUsed: number;
+  cost: number;
+}) {
+  const duration = stats.durationMs > 60000
+    ? `${Math.floor(stats.durationMs / 60000)}m ${Math.floor((stats.durationMs % 60000) / 1000)}s`
+    : `${Math.floor(stats.durationMs / 1000)}s`;
+
+  const lines = [
+    `[\u2713] ${stats.tasksCompleted}/${stats.totalTasks} tasks completed in ${duration}`,
+    `[\u2261] ${stats.filesModified.length} files modified, ${stats.filesCreated.length} created`,
+    `[>] ${stats.commandsRun} commands executed`,
+    `[\u03A3] ${stats.tokensUsed.toLocaleString()} tokens used ($${stats.cost.toFixed(4)})`,
+  ];
+
+  if (stats.filesModified.length > 0 && stats.filesModified.length <= 5) {
+    lines.push("");
+    lines.push(chalk.dim("Modified:"));
+    for (const f of stats.filesModified) {
+      lines.push(chalk.dim(`  \u2022 ${f}`));
+    }
+  }
+  if (stats.filesCreated.length > 0 && stats.filesCreated.length <= 5) {
+    if (stats.filesModified.length === 0) lines.push("");
+    lines.push(chalk.dim("Created:"));
+    for (const f of stats.filesCreated) {
+      lines.push(chalk.dim(`  \u2022 ${f}`));
+    }
+  }
+
+  printPanel(lines.join("\n"), "Mission Complete", THEME.success, true, false, true);
+}
+
+/**
+ * Render a compact token usage bar for display.
+ */
+export function renderTokenBar(used: number, total: number, width = 12): string {
+  if (total <= 0) return "";
+  const ratio = Math.max(0, Math.min(1, used / total));
+  const filled = Math.round(ratio * width);
+  const empty = width - filled;
+  const pct = Math.round(ratio * 100);
+  const barColor = pct > 90 ? chalk.red : pct > 70 ? chalk.yellow : chalk.green;
+  return `${barColor("\u2588".repeat(filled))}${chalk.dim("\u2591".repeat(empty))} ${pct}%`;
 }

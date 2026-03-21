@@ -317,3 +317,40 @@ export async function lintProject() {
     return `Lint Failed:\n${error.stdout || ""}\n${error.stderr || ""}`;
   }
 }
+
+export function fileTree(dir = ".", options: { maxDepth?: number } = {}) {
+  const maxDepth = options.maxDepth ?? 2;
+  const cwd = process.cwd();
+  const root = path.resolve(cwd, dir);
+  if (!fs.existsSync(root)) return `Error: Directory not found: ${dir}`;
+
+  const results: string[] = [];
+
+  function walk(current: string, depth: number, prefix: string) {
+    if (depth > maxDepth) return;
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    const sorted = entries.sort((a, b) => {
+      if (a.isDirectory() && !b.isDirectory()) return -1;
+      if (!a.isDirectory() && b.isDirectory()) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    for (let i = 0; i < sorted.length; i++) {
+      const entry = sorted[i];
+      if (entry.name.startsWith(".") && entry.name !== ".env") continue;
+      if (IGNORE_DIRS.has(entry.name)) continue;
+
+      const isLast = i === sorted.length - 1;
+      const connector = isLast ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
+      results.push(`${prefix}${connector}${entry.name}${entry.isDirectory() ? "/" : ""}`);
+
+      if (entry.isDirectory()) {
+        walk(path.join(current, entry.name), depth + 1, prefix + (isLast ? "    " : "\u2502   "));
+      }
+    }
+  }
+
+  results.push(path.basename(root) + "/");
+  walk(root, 1, "");
+  return results.join("\n");
+}

@@ -13,6 +13,10 @@ const PROVIDER_ALIASES: Record<string, string> = {
   hf: "hf",
   huggingface: "hf",
   hugging_face: "hf",
+  grok: "xai",
+  "x.ai": "xai",
+  router: "openrouter",
+  or: "openrouter",
 };
 
 function normalizeProviderName(name?: string) {
@@ -45,6 +49,18 @@ export async function getProvider(name?: string) {
   if (providerName === "hf") {
     const { HuggingFaceProvider } = await import("./huggingface");
     return new HuggingFaceProvider();
+  }
+  if (providerName === "openrouter") {
+    const { OpenRouterProvider } = await import("./openrouter");
+    return new OpenRouterProvider();
+  }
+  if (providerName === "xai") {
+    const { XAIProvider } = await import("./xai");
+    return new XAIProvider();
+  }
+  if (providerName === "groq") {
+    const { GroqProvider } = await import("./groq");
+    return new GroqProvider();
   }
   throw new Error(`Unknown provider: ${providerName}. Available: ${BUILTIN_PROVIDERS.join(", ")}`);
 }
